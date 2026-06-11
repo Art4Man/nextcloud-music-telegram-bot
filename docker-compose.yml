@@ -1,0 +1,39 @@
+# Reaching the tailnet from a container: this compose file uses host networking,
+# so the containers ride the host's tailscaled — install + `tailscale up` on the
+# Docker host first. (Alternative: a tailscale sidecar container with TS_AUTHKEY;
+# see README → Deploy with Docker.)
+#
+# Standard mode (20 MB limit):   docker compose up -d
+# Large-file mode (up to 2 GB):  docker compose --profile large up -d
+#   (requires TELEGRAM_API_ID / TELEGRAM_API_HASH in .env and
+#    TELEGRAM_API_BASE_URL=http://127.0.0.1:8081)
+
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    network_mode: host
+    volumes:
+      # SSH key(s) for the destination; point DEST_SSH_KEY_PATH at /secrets/<name>.
+      - ./secrets:/secrets:ro
+      # Keeps the pinned SSH host key across container rebuilds.
+      - bot-state:/home/bot/.config/nc-music-bot
+      # Shared with telegram-bot-api in large mode: getFile returns paths here.
+      - bot-api-data:/var/lib/telegram-bot-api
+
+  telegram-bot-api:
+    image: aiogram/telegram-bot-api:latest
+    profiles: ["large"]
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:?set TELEGRAM_API_ID in .env for the large profile}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:?set TELEGRAM_API_HASH in .env for the large profile}
+      TELEGRAM_LOCAL: "1"
+    volumes:
+      - bot-api-data:/var/lib/telegram-bot-api
+
+volumes:
+  bot-state:
+  bot-api-data:

@@ -1,0 +1,29 @@
+# Secrets and local config — never commit
+.env
+*.key
+*.pem
+id_ed25519*
+id_rsa*
+secrets/
+known_hosts
+
+# Planning notes (contain environment details / credentials)
+nextcloud-music-telegram-bot-PLAN.md
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Tooling caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

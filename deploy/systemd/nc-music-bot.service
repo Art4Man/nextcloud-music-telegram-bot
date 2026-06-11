@@ -1,0 +1,19 @@
+[Unit]
+Description=Telegram to Nextcloud music relay (nc-music-bot)
+Documentation=https://github.com/amir/nextcloud-music-telegram-bot
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ncmusicbot
+WorkingDirectory=/opt/nc-music-bot
+# The app reads .env from its working directory.
+ExecStart=/opt/nc-music-bot/.venv/bin/python -m nc_music_bot
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
