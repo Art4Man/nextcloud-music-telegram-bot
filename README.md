@@ -44,7 +44,7 @@ uv sync
 # 1. Create a bot: talk to @BotFather on Telegram, copy the token.
 
 # 2. Give the bot an SSH key on the destination (asks for the password once):
-deploy/setup-ssh-key.sh root@100.64.0.42
+deploy/setup-ssh-key.sh root@<dest-tailnet-ip>
 
 # 3. Configure:
 cp .env.example .env   # fill in token, ALLOWED_USER_IDS, DEST_*, NEXTCLOUD_*
@@ -100,6 +100,16 @@ git clone <this repo> && cd nextcloud-music-telegram-bot
 sudo ./install.sh
 ```
 
+If the repository is public (or git auth is set up on the server), the clone step can be
+skipped — the installer fetches the source itself:
+
+```bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/<you>/nextcloud-music-telegram-bot/main/install.sh)"
+```
+
+(For a private repo this one-liner can't download the script or clone, so use the
+clone-then-run flow above.)
+
 The interactive installer handles everything end to end: it installs whatever is missing
 (Docker via get.docker.com, Tailscale via tailscale.com/install.sh, ssh/rsync via your package
 manager), joins the server to your tailnet, validates your bot token live against Telegram,
@@ -118,12 +128,15 @@ Oracle Cloud Always Free works fine: create an Always Free `VM.Standard.E2.1.Mic
 Ubuntu instance and run the two commands above. The bot only makes *outbound* connections
 (Telegram HTTPS + tailnet), so no ingress rules are needed.
 
-### Generic VM / VPS without Docker (systemd)
+### Without Docker (systemd)
+
+Prefer no containers? `deploy/install-systemd.sh` provisions a native install instead:
+a dedicated system user, a uv-managed virtualenv under `/opt/nc-music-bot`, and a hardened
+systemd unit.
 
 ```bash
 sudo tailscale up                    # join the tailnet
-sudo deploy/install-systemd.sh       # /opt/nc-music-bot + dedicated user + systemd unit
-# then follow the printed next steps (key, .env, --check, start)
+sudo deploy/install-systemd.sh       # then follow the printed next steps (key, .env, --check, start)
 journalctl -u nc-music-bot -f        # logs
 ```
 
