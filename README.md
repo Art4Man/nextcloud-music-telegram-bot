@@ -91,20 +91,43 @@ Typical home-server values (snap Nextcloud):
 
 ## Deploy
 
-### Generic VM / VPS (systemd)
+### One-command install (Docker, recommended)
+
+On any internet-connected Linux server:
 
 ```bash
-sudo tailscale up                 # join the tailnet
-sudo deploy/install.sh            # /opt/nc-music-bot + dedicated user + systemd unit
-# then follow the printed next steps (key, .env, --check, start)
-journalctl -u nc-music-bot -f     # logs
+git clone <this repo> && cd nextcloud-music-telegram-bot
+sudo ./install.sh
+```
+
+The interactive installer handles everything end to end: it installs whatever is missing
+(Docker via get.docker.com, Tailscale via tailscale.com/install.sh, ssh/rsync via your package
+manager), joins the server to your tailnet, validates your bot token live against Telegram,
+asks for the whitelist and destination details (with sensible defaults), generates a dedicated
+SSH key and installs it on the destination, runs the health check, and starts the bot with
+docker compose. Re-running it is safe — existing config and keys are kept unless you say
+otherwise.
+
+It also installs a management command:
+
+```
+nc-music-bot up | down | restart | logs | status | check | edit | update | uninstall
 ```
 
 Oracle Cloud Always Free works fine: create an Always Free `VM.Standard.E2.1.Micro` (or A1)
-Ubuntu instance, then run the exact steps above. The bot only makes *outbound* connections
+Ubuntu instance and run the two commands above. The bot only makes *outbound* connections
 (Telegram HTTPS + tailnet), so no ingress rules are needed.
 
-### Docker
+### Generic VM / VPS without Docker (systemd)
+
+```bash
+sudo tailscale up                    # join the tailnet
+sudo deploy/install-systemd.sh       # /opt/nc-music-bot + dedicated user + systemd unit
+# then follow the printed next steps (key, .env, --check, start)
+journalctl -u nc-music-bot -f        # logs
+```
+
+### Docker, manual
 
 The compose file uses **host networking** so containers reach the tailnet through the host's
 tailscaled — install Tailscale on the Docker host and `tailscale up` first.

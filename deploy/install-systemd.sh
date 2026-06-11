@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Provision nc-music-bot on a generic Linux VM (Debian/Ubuntu-flavored):
+# Provision nc-music-bot on a generic Linux VM WITHOUT Docker (Debian/Ubuntu-flavored):
 # dedicated user, /opt/nc-music-bot install, systemd unit.
 #
-# Run as root from a checkout of the repo:   sudo deploy/install.sh
+# Run as root from a checkout of the repo:   sudo deploy/install-systemd.sh
 set -euo pipefail
 
 APP_DIR=/opt/nc-music-bot
@@ -10,7 +10,7 @@ SERVICE_USER=ncmusicbot
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 if [[ $EUID -ne 0 ]]; then
-    echo "Run as root: sudo deploy/install.sh" >&2
+    echo "Run as root: sudo deploy/install-systemd.sh" >&2
     exit 1
 fi
 
