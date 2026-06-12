@@ -4,7 +4,7 @@
 # Run on any internet-connected Linux server, from a checkout of this repo:
 #     sudo ./install.sh
 # (or, if the repo is reachable for you anonymously / via configured git auth:
-#     bash <(curl -fsSL https://raw.githubusercontent.com/<you>/nextcloud-music-telegram-bot/main/install.sh) )
+#     bash <(curl -fsSL https://raw.githubusercontent.com/Art4Man/nextcloud-music-telegram-bot/main/install.sh) )
 #
 # What it does, in order:
 #   1. installs missing dependencies (curl/ssh/rsync/git via your package manager,
@@ -19,7 +19,7 @@
 set -euo pipefail
 
 APP_DIR=${NC_MUSIC_BOT_DIR:-/opt/nc-music-bot}
-REPO_URL=${NC_MUSIC_BOT_REPO:-https://github.com/CHANGEME/nextcloud-music-telegram-bot.git}
+REPO_URL=${NC_MUSIC_BOT_REPO:-https://github.com/Art4Man/nextcloud-music-telegram-bot.git}
 DEFAULT_DEST_PATH=/var/snap/nextcloud/common/nextcloud/data/admin/files/Music
 KEY_NAME=nc-music-bot_ed25519
 
