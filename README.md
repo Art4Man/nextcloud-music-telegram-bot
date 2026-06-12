@@ -1,4 +1,7 @@
-# nc-music-bot
+<h1 align="center">Telegram to Nextcloud music bot</h1>
+<p align="center">
+  <img src="assets/logo.png" alt="Telegram-to-Nextcloud-music-bot logo" width="200"/>
+</p>
 
 Send a song to a Telegram bot → it lands in your home Nextcloud music library → the library
 is rescanned automatically → the track shows up in Amperfy (or any Subsonic client) right away.
