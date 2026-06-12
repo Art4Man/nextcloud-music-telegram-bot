@@ -38,7 +38,7 @@ Prereqs on the bot host: Python 3.12+, [uv](https://docs.astral.sh/uv/),
 [Tailscale](https://tailscale.com) joined to the same tailnet as the destination.
 
 ```bash
-git clone <this repo> && cd nextcloud-music-telegram-bot
+git clone https://github.com/Art4Man/nextcloud-music-telegram-bot && cd nextcloud-music-telegram-bot
 uv sync
 
 # 1. Create a bot: talk to @BotFather on Telegram, copy the token.
@@ -96,7 +96,7 @@ Typical home-server values (snap Nextcloud):
 On any internet-connected Linux server:
 
 ```bash
-git clone <this repo> && cd nextcloud-music-telegram-bot
+git clone https://github.com/Art4Man/nextcloud-music-telegram-bot && cd nextcloud-music-telegram-bot
 sudo ./install.sh
 ```
 
@@ -104,7 +104,7 @@ If the repository is public (or git auth is set up on the server), the clone ste
 skipped — the installer fetches the source itself:
 
 ```bash
-sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/<you>/nextcloud-music-telegram-bot/main/install.sh)"
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/Art4Man/nextcloud-music-telegram-bot/main/install.sh)"
 ```
 
 (For a private repo this one-liner can't download the script or clone, so use the
@@ -208,7 +208,7 @@ uv run mypy            # strict
 uv run ruff check && uv run ruff format --check
 ```
 
-Project layout and conventions: see [CLAUDE.md](CLAUDE.md).
+Project layout and conventions are in `CLAUDE.md` (gitignored, local dev only).
 
 ## License
 
