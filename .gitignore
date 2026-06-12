@@ -10,6 +10,9 @@ known_hosts
 # Planning notes (contain environment details / credentials)
 nextcloud-music-telegram-bot-PLAN.md
 
+# Claude Code instructions (local dev only)
+CLAUDE.md
+
 # Python
 __pycache__/
 *.py[cod]
