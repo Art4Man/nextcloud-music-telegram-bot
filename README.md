@@ -181,6 +181,76 @@ API automatically. To go back, call the cloud API's `logOut` method for your bot
 - SSH auth via a dedicated key (recommended) or password (`DEST_SSH_PASSWORD`); `.env`, keys, and `secrets/` are gitignored.
 - The bot host stores nothing: temp files are deleted in a `finally`, success or failure.
 
+## Dedicated SSH user on the destination (recommended)
+
+The default config uses `root`, which works but gives the bot more access than it needs.
+A better approach is a dedicated system user that can only write to the music directory and
+run the two `occ` scan commands.
+
+### 1. Create the user
+
+Run these on the **destination** (home server):
+
+```bash
+sudo useradd --system --create-home --shell /bin/bash nc-music-bot
+```
+
+### 2. Grant write access to the music directory
+
+```bash
+# Snap Nextcloud (adjust path if your library lives elsewhere):
+sudo chown nc-music-bot:nc-music-bot \
+    /var/snap/nextcloud/common/nextcloud/data/admin/files/Music
+```
+
+### 3. Allow passwordless occ (only if RUN_SCAN=true)
+
+`occ` requires root on snap Nextcloud. A narrow `sudoers` entry lets the bot run it
+without a full root shell:
+
+```bash
+sudo tee /etc/sudoers.d/nc-music-bot <<'EOF'
+nc-music-bot ALL=(root) NOPASSWD: /snap/bin/nextcloud.occ
+EOF
+sudo chmod 440 /etc/sudoers.d/nc-music-bot
+```
+
+Then tell the bot to prefix the command with `sudo`:
+
+```env
+DEST_SSH_USER=nc-music-bot
+NEXTCLOUD_OCC=sudo nextcloud.occ
+```
+
+If you are **not** running occ scans (`RUN_SCAN=false`), skip this step entirely —
+the user only needs write access to `DEST_PATH`.
+
+### 4. Generate and install an SSH key
+
+```bash
+# On the bot host (or wherever you have ssh-keygen):
+ssh-keygen -t ed25519 -N "" -C "nc-music-bot@$(hostname)" -f ~/.ssh/nc-music-bot_ed25519
+
+# Copy the public key to the destination:
+ssh-copy-id -i ~/.ssh/nc-music-bot_ed25519.pub nc-music-bot@<dest-tailnet-ip>
+```
+
+Or use the helper script from a checkout of this repo (does the same thing):
+
+```bash
+deploy/setup-ssh-key.sh nc-music-bot@<dest-tailnet-ip>
+```
+
+### 5. Update .env
+
+```env
+DEST_SSH_USER=nc-music-bot
+DEST_SSH_KEY_PATH=/secrets/nc-music-bot_ed25519   # Docker path
+```
+
+Run `nc-music-bot check` (or `uv run python -m nc_music_bot --check`) to verify
+everything before restarting.
+
 ## Amperfy / Subsonic
 
 After a successful upload the bot runs `occ files:scan` (so Nextcloud sees the file) and
