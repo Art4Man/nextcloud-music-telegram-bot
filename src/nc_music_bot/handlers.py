@@ -64,6 +64,7 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     message = update.effective_message
     if message is None:
         return
+    uid = update.effective_user.id if update.effective_user else "unknown"
     settings = _settings(context)
     destination = _destination(context)
     status = await message.reply_text("⬇️ Receiving…")
@@ -71,6 +72,7 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     try:
         local, filename = await download_media(message, settings)
         workdir = local.parent
+        log.info("Upload started — user %s: %s", uid, filename)
         await status.edit_text(f"📤 Uploading {filename} …")
         remote_name = await destination.upload(local, filename)
         reply = f"✅ Added {remote_name}"
@@ -81,11 +83,13 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 reply = f"⚠️ Uploaded {remote_name}, but the library scan failed: {scan.detail}"
             elif scan.new_tracks is not None:
                 reply = f"{reply} — {scan.new_tracks} track(s) indexed"
+        log.info("Transfer complete — user %s: %s", uid, remote_name)
         await status.edit_text(reply)
     except UserFacingError as exc:
+        log.warning("Transfer failed — user %s: %s", uid, exc)
         await status.edit_text(f"❌ {exc}")
     except Exception:
-        log.exception("Transfer failed")
+        log.exception("Transfer failed — user %s", uid)
         await status.edit_text("❌ Transfer failed — see the bot logs for details.")
     finally:
         if workdir is not None:
