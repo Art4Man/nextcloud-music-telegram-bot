@@ -213,6 +213,8 @@ setup_ssh_key() {
         ssh-keygen -t ed25519 -N "" -C "nc-music-bot@$(hostname)" -f "$key" -q
         ok "Generated SSH key $APP_DIR/$key"
     fi
+    # The bot container runs as uid 1000; secrets are created by root, so fix ownership.
+    chown -R 1000:1000 "$APP_DIR/secrets/"
     local host user port
     host="$(env_get DEST_HOST)" user="$(env_get DEST_SSH_USER)" port="$(env_get DEST_SSH_PORT)"
     if ask_yn "Install the bot's public key on $user@$host now? (asks for that account's password once)" "y"; then
