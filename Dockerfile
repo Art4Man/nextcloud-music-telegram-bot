@@ -11,7 +11,10 @@ COPY src ./src
 RUN uv sync --frozen --no-dev
 
 # Non-root; a real HOME is needed for the pinned known_hosts (~/.config/nc-music-bot).
-RUN useradd --create-home bot && chown -R bot /app
+RUN useradd --create-home bot \
+    && mkdir -p /home/bot/.config/nc-music-bot \
+    && chown -R bot:bot /home/bot \
+    && chown -R bot /app
 USER bot
 
 ENV PATH="/app/.venv/bin:$PATH"
