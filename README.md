@@ -43,8 +43,13 @@ uv sync
 
 # 1. Create a bot: talk to @BotFather on Telegram, copy the token.
 
-# 2. Give the bot an SSH key on the destination (asks for the password once):
+# 2. Set up SSH auth — pick one:
+#    a) Key-based (recommended): copies a fresh key to the destination, asks for the
+#       password once, then never again.
 deploy/setup-ssh-key.sh root@<dest-tailnet-ip>
+#    b) Password auth: skip this step, then set DEST_SSH_PASSWORD in .env instead of
+#       DEST_SSH_KEY_PATH. Requires PasswordAuthentication yes in sshd_config on the
+#       destination.
 
 # 3. Configure:
 cp .env.example .env   # fill in token, ALLOWED_USER_IDS, DEST_*, NEXTCLOUD_*
@@ -74,8 +79,8 @@ template). Env vars override `.env`.
 | `DEST_HOST` | yes | — | Tailnet IP or MagicDNS name of the destination |
 | `DEST_SSH_PORT` | no | `22` | SSH port |
 | `DEST_SSH_USER` | no | `root` | SSH user (snap Nextcloud's `occ` requires root) |
-| `DEST_SSH_KEY_PATH` | one of | — | Private key path (recommended) |
-| `DEST_SSH_PASSWORD` | one of | — | Password auth fallback (discouraged) |
+| `DEST_SSH_KEY_PATH` | one of | — | Private key path (recommended); Docker installs expect `/secrets/nc-music-bot_ed25519` |
+| `DEST_SSH_PASSWORD` | one of | — | Password auth alternative — set this instead of `DEST_SSH_KEY_PATH`; requires `PasswordAuthentication yes` in `sshd_config` on the destination |
 | `DEST_KNOWN_HOSTS` | no | pin on first connect | known_hosts file for host-key verification |
 | `DEST_PATH` | yes | — | Absolute upload directory on the destination |
 | `RUN_SCAN` | no | `true` | Run occ scans after upload (off = plain SFTP drop) |
@@ -173,7 +178,7 @@ API automatically. To go back, call the cloud API's `logOut` method for your bot
 - Filenames are sanitized to a single path component (no traversal out of `DEST_PATH`);
   uploads stage as `.part` and rename only when complete.
 - SSH host key is pinned (first-connect TOFU by default, or provide `DEST_KNOWN_HOSTS`).
-- Dedicated SSH key for the bot; `.env`, keys, and `secrets/` are gitignored.
+- SSH auth via a dedicated key (recommended) or password (`DEST_SSH_PASSWORD`); `.env`, keys, and `secrets/` are gitignored.
 - The bot host stores nothing: temp files are deleted in a `finally`, success or failure.
 
 ## Amperfy / Subsonic
