@@ -119,11 +119,9 @@ stage_source() {
     elif [[ -f "$APP_DIR/docker-compose.yml" ]]; then
         ok "Using existing install in $APP_DIR (update later with: nc-music-bot update)"
     else
-        [[ "$REPO_URL" == *CHANGEME* ]] && die \
-            "Run this from a checkout (git clone … && sudo ./install.sh), or set NC_MUSIC_BOT_REPO=<git url>."
         say "Cloning $REPO_URL"
         git clone "$REPO_URL" "$APP_DIR" </dev/tty \
-            || die "Clone failed — for a private repo, clone manually and run sudo ./install.sh from the checkout."
+            || die "Clone failed — check that git can reach $REPO_URL (or set NC_MUSIC_BOT_REPO=<url>)."
     fi
 }
 
