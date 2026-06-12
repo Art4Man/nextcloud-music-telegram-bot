@@ -39,7 +39,15 @@ class FakeSFTP:
     async def exists(self, path: str) -> bool:
         return path in self.existing
 
-    async def put(self, local: str, remote: str) -> None:
+    async def put(
+        self,
+        local: str,
+        remote: str,
+        progress_handler: Callable[[bytes, bytes, int, int], None] | None = None,
+    ) -> None:
+        if progress_handler is not None:
+            progress_handler(local.encode(), remote.encode(), 512, 1024)
+            progress_handler(local.encode(), remote.encode(), 1024, 1024)
         self.puts.append((local, remote))
         self.existing.add(remote)
 
@@ -128,6 +136,22 @@ async def test_upload_avoids_collisions(
     final = await NextcloudDestination(make_settings()).upload(local, "song.mp3")
 
     assert final == "song (2).mp3"
+
+
+async def test_upload_forwards_progress(
+    make_settings: MakeSettings, patch_connect: PatchConnect, tmp_path: Path
+) -> None:
+    conn = FakeConn()
+    patch_connect(conn)
+    local = tmp_path / "song.mp3"
+    local.write_bytes(b"x")
+    seen: list[tuple[int, int]] = []
+
+    await NextcloudDestination(make_settings()).upload(
+        local, "song.mp3", progress=lambda copied, total: seen.append((copied, total))
+    )
+
+    assert seen == [(512, 1024), (1024, 1024)]
 
 
 async def test_upload_rejects_unsafe_names(make_settings: MakeSettings, tmp_path: Path) -> None:

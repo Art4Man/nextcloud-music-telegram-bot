@@ -11,6 +11,7 @@ from .config import Settings
 from .destination import NextcloudDestination
 from .download import download_media
 from .errors import UserFacingError
+from .progress import UploadProgressReporter
 
 log = logging.getLogger(__name__)
 
@@ -74,7 +75,11 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         workdir = local.parent
         log.info("Upload started — user %s: %s", uid, filename)
         await status.edit_text(f"📤 Uploading {filename} …")
-        remote_name = await destination.upload(local, filename)
+        reporter = UploadProgressReporter(status, filename)
+        try:
+            remote_name = await destination.upload(local, filename, progress=reporter)
+        finally:
+            await reporter.finish()
         reply = f"✅ Added {remote_name}"
         if settings.run_scan:
             await status.edit_text(f"🔍 Indexing {remote_name} …")

@@ -8,6 +8,7 @@ import logging
 import posixpath
 import re
 import shlex
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -49,8 +50,13 @@ class NextcloudDestination:
     def __init__(self, settings: Settings) -> None:
         self._s = settings
 
-    async def upload(self, local: Path, filename: str) -> str:
-        """Upload `local` into DEST_PATH; returns the (collision-safe) remote name."""
+    async def upload(
+        self, local: Path, filename: str, progress: Callable[[int, int], None] | None = None
+    ) -> str:
+        """Upload `local` into DEST_PATH; returns the (collision-safe) remote name.
+
+        `progress`, if given, is called with (bytes copied, total bytes) as blocks land.
+        """
         if not is_safe_remote_name(filename):
             raise UserFacingError(f"Refusing unsafe filename: {filename!r}")
         s = self._s
@@ -65,7 +71,8 @@ class NextcloudDestination:
                 counter += 1
             target = posixpath.join(s.dest_path, final)
             # Stage under a .part name so a half-written file can never be scanned in.
-            await sftp.put(str(local), f"{target}.part")
+            handler = _adapt_progress(progress) if progress is not None else None
+            await sftp.put(str(local), f"{target}.part", progress_handler=handler)
             await sftp.rename(f"{target}.part", target)
             log.info("Uploaded %s -> %s", local.name, target)
         except (OSError, asyncssh.Error) as exc:
@@ -189,6 +196,17 @@ class NextcloudDestination:
                 path,
             )
         return path
+
+
+def _adapt_progress(
+    progress: Callable[[int, int], None],
+) -> Callable[[bytes, bytes, int, int], None]:
+    """Shrink asyncssh's (src, dst, copied, total) handler down to (copied, total)."""
+
+    def handler(_src: bytes, _dst: bytes, copied: int, total: int) -> None:
+        progress(copied, total)
+
+    return handler
 
 
 def parse_track_count(scan_output: str) -> int | None:

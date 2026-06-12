@@ -278,7 +278,7 @@ new tracks appear without any server-side clicking.
 
 ```bash
 uv sync
-uv run pytest          # 46 tests, asyncssh fully mocked
+uv run pytest          # 54 tests, asyncssh fully mocked
 uv run mypy            # strict
 uv run ruff check && uv run ruff format --check
 ```
