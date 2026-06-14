@@ -12,6 +12,7 @@ from .destination import NextcloudDestination
 from .download import download_media
 from .errors import UserFacingError
 from .progress import UploadProgressReporter
+from .queue import QueueManager
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +31,10 @@ def _settings(context: ContextTypes.DEFAULT_TYPE) -> Settings:
 def _destination(context: ContextTypes.DEFAULT_TYPE) -> NextcloudDestination:
     return cast(NextcloudDestination, context.bot_data["destination"])
 
+
+
+def _queue_manager(context: ContextTypes.DEFAULT_TYPE) -> QueueManager:
+    return cast(QueueManager, context.bot_data["queue_manager"])
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_message:
@@ -66,12 +71,11 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if message is None:
         return
 
-    status = await message.reply_text("⬇️ Receiving…")
+    queue_manager = _queue_manager(context)
 
-    await process_audio_job(
+    await queue_manager.enqueue(
         update,
         context,
-        status,
     )
 
 

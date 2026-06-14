@@ -11,6 +11,8 @@ from telegram.ext import (
     filters,
 )
 
+from nc_music_bot.queue import QueueManager
+
 from . import handlers
 from .auth import allowed_users_filter
 from .config import Settings
@@ -50,6 +52,7 @@ def build_application(settings: Settings) -> Application:
     app = builder.build()
     app.bot_data["settings"] = settings
     app.bot_data["destination"] = NextcloudDestination(settings)
+    app.bot_data["queue_manager"] = QueueManager(handlers.process_audio_job,)
 
     allowed = allowed_users_filter(settings)
     app.add_handler(CommandHandler(["start", "help"], handlers.cmd_help))
@@ -59,6 +62,7 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(MessageHandler(AUDIO_MESSAGE & ~allowed, handlers.handle_unauthorized))
     app.add_error_handler(handlers.on_error)
     return app
+
 
 
 def run_bot(settings: Settings) -> None:
