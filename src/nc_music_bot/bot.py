@@ -12,9 +12,9 @@ from telegram.ext import (
 )
 
 from . import handlers
-from .auth import allowed_users_filter
 from .config import Settings
 from .destination import NextcloudDestination
+from .whitelist import Whitelist
 
 log = logging.getLogger(__name__)
 
@@ -48,15 +48,22 @@ def build_application(settings: Settings) -> Application:
         log.info("Using self-hosted telegram-bot-api at %s (2 GB downloads)", base)
 
     app = builder.build()
+    whitelist = Whitelist(settings)
     app.bot_data["settings"] = settings
     app.bot_data["destination"] = NextcloudDestination(settings)
+    app.bot_data["whitelist"] = whitelist
 
-    allowed = allowed_users_filter(settings)
+    trusted = whitelist.audio_filter
     app.add_handler(CommandHandler(["start", "help"], handlers.cmd_help))
     app.add_handler(CommandHandler("myid", handlers.cmd_myid))
-    app.add_handler(CommandHandler("status", handlers.cmd_status, filters=allowed))
-    app.add_handler(MessageHandler(AUDIO_MESSAGE & allowed, handlers.handle_audio))
-    app.add_handler(MessageHandler(AUDIO_MESSAGE & ~allowed, handlers.handle_unauthorized))
+    app.add_handler(CommandHandler("status", handlers.cmd_status, filters=whitelist.users))
+    app.add_handler(CommandHandler("whitelist", handlers.cmd_whitelist))
+    app.add_handler(CommandHandler("allow", handlers.cmd_allow))
+    app.add_handler(CommandHandler("deny", handlers.cmd_deny))
+    app.add_handler(CommandHandler("addbot", handlers.cmd_addbot))
+    app.add_handler(CommandHandler("rmbot", handlers.cmd_rmbot))
+    app.add_handler(MessageHandler(AUDIO_MESSAGE & trusted, handlers.handle_audio))
+    app.add_handler(MessageHandler(AUDIO_MESSAGE & ~trusted, handlers.handle_unauthorized))
     app.add_error_handler(handlers.on_error)
     return app
 

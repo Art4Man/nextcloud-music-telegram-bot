@@ -67,6 +67,28 @@ uv run python -m nc_music_bot
 Send `/myid` to the bot to learn your numeric Telegram ID for `ALLOWED_USER_IDS`.
 Then send it any audio file. `/status` re-runs the destination health check from Telegram.
 
+### Auto-relaying another bot's audio
+
+The bot can pick up MP3s another bot posts in a shared group (e.g. a Spotify
+downloader) and upload them automatically — no command needed. This relies on
+Telegram's Bot-to-Bot Communication feature:
+
+1. In @BotFather, enable **Bot-to-Bot Communication Mode** for your bot.
+2. Make the bot a **group admin**, or **disable its Group Privacy Mode**, so
+   Telegram delivers other bots' messages to it.
+3. Whitelist the source bot via `SOURCE_BOT_USERNAMES`, or at runtime with
+   `/addbot @TheirBot`.
+
+### Whitelist management (admins)
+
+Admins — the IDs listed in `ALLOWED_USER_IDS` — can manage both whitelists live:
+
+- `/whitelist` — show allowed users and source bots
+- `/allow <id> [id…]` / `/deny <id> [id…]` — manage allowed users
+- `/addbot <@username> [@username…]` / `/rmbot <@username> [@username…]` — manage source bots
+
+Changes apply immediately; set `WHITELIST_STORE_PATH` to persist them across restarts.
+
 ## Configuration reference
 
 All settings come from environment variables or `.env` (see `.env.example` for the documented
@@ -76,6 +98,8 @@ template). Env vars override `.env`.
 |---|---|---|---|
 | `TELEGRAM_BOT_TOKEN` | to run | — | Token from @BotFather (`--check` works without it) |
 | `ALLOWED_USER_IDS` | yes | — | Comma-separated numeric Telegram IDs allowed to use the bot |
+| `SOURCE_BOT_USERNAMES` | no | — | Comma-separated bot @usernames whose audio is auto-relayed (needs Bot-to-Bot Communication Mode in @BotFather + the bot as group admin or with Group Privacy off) |
+| `WHITELIST_STORE_PATH` | no | — | JSON file persisting runtime whitelist changes (`/allow`, `/addbot`, …); unset = in-memory only. Put on a mounted volume for Docker |
 | `MAX_FILE_MB` | no | `2000` | Reject files larger than this |
 | `TELEGRAM_API_BASE_URL` | no | — | Self-hosted telegram-bot-api URL; unlocks 2 GB downloads |
 | `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` | large mode | — | Used by the bot-api helper container only |

@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     # Empty is tolerated so `--check` can run without a token; `run` enforces it.
     telegram_bot_token: str = ""
     allowed_user_ids: Annotated[frozenset[int], NoDecode]
+    source_bot_usernames: Annotated[frozenset[str], NoDecode] = frozenset()
+    whitelist_store_path: Path | None = None
     max_file_mb: int = 2000
     telegram_api_base_url: str | None = None
 
@@ -61,6 +63,14 @@ class Settings(BaseSettings):
             return frozenset(int(part) for part in parts)
         return value
 
+    @field_validator("source_bot_usernames", mode="before")
+    @classmethod
+    def _parse_source_bots(cls, value: object) -> object:
+        if isinstance(value, str):
+            parts = value.replace(",", " ").split()
+            return frozenset(part.lstrip("@").lower() for part in parts)
+        return value
+
     @field_validator("telegram_api_base_url")
     @classmethod
     def _normalize_base_url(cls, value: str | None) -> str | None:
@@ -74,7 +84,7 @@ class Settings(BaseSettings):
             raise ValueError("DEST_PATH must be an absolute path on the destination")
         return value
 
-    @field_validator("dest_ssh_key_path", "dest_known_hosts", "temp_dir")
+    @field_validator("dest_ssh_key_path", "dest_known_hosts", "temp_dir", "whitelist_store_path")
     @classmethod
     def _expand_user(cls, value: Path | None) -> Path | None:
         return value.expanduser() if value is not None else None
