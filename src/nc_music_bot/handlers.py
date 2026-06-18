@@ -256,5 +256,22 @@ async def handle_unauthorized(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
 
+async def handle_unsupported(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Reply to a whitelisted user who sent something that isn't an audio file.
+
+    Covers links, plain text, photos, videos, stickers — anything that isn't
+    audio or a known command. Keeps the user from staring at silence.
+    """
+    message = update.effective_message
+    if message is None:
+        return
+    uid = update.effective_user.id if update.effective_user else "unknown"
+    log.info("Ignoring non-audio message from user %s", uid)
+    await message.reply_text(
+        "That doesn't look like an audio file. Send me a song as music or as a "
+        "file (.mp3, .flac, .m4a, .ogg, …) — links and plain text aren't supported."
+    )
+
+
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     log.error("Unhandled exception while processing an update", exc_info=context.error)

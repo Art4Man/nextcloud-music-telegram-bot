@@ -18,11 +18,6 @@ from .whitelist import Whitelist
 
 log = logging.getLogger(__name__)
 
-# Music often arrives as a *document* whose mime_type is wrong or missing
-# (e.g. "application/octet-stream" when forwarded from a downloader bot), so
-# filters.Document.AUDIO — which only matches mime_type "audio/…" — drops it.
-# Fall back to the file extension to catch those without accepting arbitrary
-# non-audio documents (PDFs etc.).
 _AUDIO_EXTENSIONS = (
     "mp3",
     "flac",
@@ -86,6 +81,9 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(CommandHandler("rmbot", handlers.cmd_rmbot))
     app.add_handler(MessageHandler(AUDIO_MESSAGE & trusted, handlers.handle_audio))
     app.add_handler(MessageHandler(AUDIO_MESSAGE & ~trusted, handlers.handle_unauthorized))
+    app.add_handler(
+        MessageHandler(trusted & ~AUDIO_MESSAGE & ~filters.COMMAND, handlers.handle_unsupported)
+    )
     app.add_error_handler(handlers.on_error)
     return app
 

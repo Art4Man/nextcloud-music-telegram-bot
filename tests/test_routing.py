@@ -1,6 +1,7 @@
 import datetime as dt
 
-from telegram import Audio, Chat, Document, Message, Update, User
+from telegram import Audio, Chat, Document, Message, MessageEntity, Update, User
+from telegram.ext import filters
 
 from nc_music_bot.bot import AUDIO_MESSAGE
 from nc_music_bot.whitelist import Whitelist
@@ -12,6 +13,8 @@ def _update(
     *,
     document: Document | None = None,
     audio: Audio | None = None,
+    text: str | None = None,
+    entities: tuple[MessageEntity, ...] = (),
     user_id: int = 123,
 ) -> Update:
     message = Message(
@@ -21,6 +24,8 @@ def _update(
         from_user=User(id=user_id, first_name="Tester", is_bot=False),
         document=document,
         audio=audio,
+        text=text,
+        entities=entities,
     )
     return Update(update_id=1, message=message)
 
@@ -33,8 +38,6 @@ def _audio_document(name: str, mime: str | None, user_id: int = 123) -> Update:
 def test_audio_document_with_nonaudio_mime_routes_to_handle_audio(
     make_settings: MakeSettings,
 ) -> None:
-    # Music forwarded from a downloader bot arrives as a document with a bogus
-    # mime type but an audio extension — filters.Document.AUDIO misses it.
     update = _audio_document("Artist - Title.mp3", "application/octet-stream", user_id=123)
     trusted = Whitelist(make_settings()).audio_filter
 
@@ -56,3 +59,29 @@ def test_unauthorized_user_routes_to_handle_unauthorized(make_settings: MakeSett
 
     assert not (AUDIO_MESSAGE & trusted).check_update(update)
     assert (AUDIO_MESSAGE & ~trusted).check_update(update)
+
+
+def test_trusted_user_link_routes_to_handle_unsupported(make_settings: MakeSettings) -> None:
+    update = _update(text="https://example.com/song", user_id=123)
+    trusted = Whitelist(make_settings()).audio_filter
+    fallback = trusted & ~AUDIO_MESSAGE & ~filters.COMMAND
+
+    assert fallback.check_update(update)
+    assert not (AUDIO_MESSAGE & trusted).check_update(update)
+
+
+def test_trusted_user_command_is_not_caught_by_fallback(make_settings: MakeSettings) -> None:
+    command = MessageEntity(type=MessageEntity.BOT_COMMAND, offset=0, length=5)
+    update = _update(text="/help", entities=(command,), user_id=123)
+    trusted = Whitelist(make_settings()).audio_filter
+    fallback = trusted & ~AUDIO_MESSAGE & ~filters.COMMAND
+
+    assert not fallback.check_update(update)
+
+
+def test_untrusted_user_link_is_silent(make_settings: MakeSettings) -> None:
+    update = _update(text="https://example.com/song", user_id=999)
+    trusted = Whitelist(make_settings()).audio_filter
+    fallback = trusted & ~AUDIO_MESSAGE & ~filters.COMMAND
+
+    assert not fallback.check_update(update)
