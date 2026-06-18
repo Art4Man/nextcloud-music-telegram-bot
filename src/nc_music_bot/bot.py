@@ -18,7 +18,29 @@ from .whitelist import Whitelist
 
 log = logging.getLogger(__name__)
 
-AUDIO_MESSAGE = filters.AUDIO | filters.Document.AUDIO
+# Music often arrives as a *document* whose mime_type is wrong or missing
+# (e.g. "application/octet-stream" when forwarded from a downloader bot), so
+# filters.Document.AUDIO — which only matches mime_type "audio/…" — drops it.
+# Fall back to the file extension to catch those without accepting arbitrary
+# non-audio documents (PDFs etc.).
+_AUDIO_EXTENSIONS = (
+    "mp3",
+    "flac",
+    "m4a",
+    "ogg",
+    "opus",
+    "aac",
+    "wav",
+    "wma",
+    "alac",
+    "aiff",
+    "mka",
+)
+_AUDIO_BY_EXTENSION: filters.BaseFilter = filters.Document.FileExtension(_AUDIO_EXTENSIONS[0])
+for _ext in _AUDIO_EXTENSIONS[1:]:
+    _AUDIO_BY_EXTENSION |= filters.Document.FileExtension(_ext)
+
+AUDIO_MESSAGE = filters.AUDIO | filters.Document.AUDIO | _AUDIO_BY_EXTENSION
 
 
 async def _post_init(app: Application) -> None:
