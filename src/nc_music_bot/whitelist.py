@@ -50,6 +50,9 @@ class Whitelist:
     def is_admin(self, user_id: int | None) -> bool:
         return user_id is not None and user_id in self.admin_ids
 
+    def is_allowed_user(self, user_id: int | None) -> bool:
+        return user_id is not None and user_id in self.users.user_ids
+
     def list_users(self) -> list[int]:
         return sorted(self.users.user_ids)
 

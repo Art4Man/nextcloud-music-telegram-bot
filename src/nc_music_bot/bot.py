@@ -14,25 +14,13 @@ from telegram.ext import (
 from . import handlers
 from .config import Settings
 from .destination import NextcloudDestination
+from .download import AUDIO_EXTENSIONS
 from .whitelist import Whitelist
 
 log = logging.getLogger(__name__)
 
-_AUDIO_EXTENSIONS = (
-    "mp3",
-    "flac",
-    "m4a",
-    "ogg",
-    "opus",
-    "aac",
-    "wav",
-    "wma",
-    "alac",
-    "aiff",
-    "mka",
-)
-_AUDIO_BY_EXTENSION: filters.BaseFilter = filters.Document.FileExtension(_AUDIO_EXTENSIONS[0])
-for _ext in _AUDIO_EXTENSIONS[1:]:
+_AUDIO_BY_EXTENSION: filters.BaseFilter = filters.Document.FileExtension(AUDIO_EXTENSIONS[0])
+for _ext in AUDIO_EXTENSIONS[1:]:
     _AUDIO_BY_EXTENSION |= filters.Document.FileExtension(_ext)
 
 AUDIO_MESSAGE = filters.AUDIO | filters.Document.AUDIO | _AUDIO_BY_EXTENSION
@@ -85,6 +73,7 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(
         MessageHandler(trusted & ~AUDIO_MESSAGE & ~filters.COMMAND, handlers.handle_unsupported)
     )
+    app.add_handler(MessageHandler(filters.UpdateType.GUEST_MESSAGE, handlers.handle_guest))
     app.add_error_handler(handlers.on_error)
     return app
 

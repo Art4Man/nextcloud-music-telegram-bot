@@ -79,6 +79,35 @@ Telegram's Bot-to-Bot Communication feature:
 3. Whitelist the source bot via `SOURCE_BOT_USERNAMES`, or at runtime with
    `/addbot @TheirBot`.
 
+### Adding songs by replying in a group
+
+**Reply** to a music message and **@mention** the bot — it grabs that song, uploads
+it, runs the scan, and replies with the result. Only whitelisted users
+(`ALLOWED_USER_IDS`) can trigger it. This works two ways:
+
+**A. Bot is in the group.** Just reply to the song and `@mention` the bot. To keep
+the group quiet, the bot replies **in your private chat (DM)** with live progress
+(bar + percent) — nothing is posted in the group. You must have **started the bot in
+a private chat first** (send it `/start` once); otherwise it can't DM you and the
+upload is skipped (logged on the server).
+
+**B. Bot is *not* in the group (Guest Mode).** Add a song from **any** chat the bot
+isn't in, via Telegram's [Guest Mode](https://core.telegram.org/bots/features#guest-bots)
+(Bot API 10.0, needs `python-telegram-bot>=22.8`):
+
+1. Open your bot's settings in [@BotFather's MiniApp](https://t.me/Botfather?startapp)
+   and enable **Guest Mode**.
+2. In any chat, reply to a song and `@mention` the bot.
+
+Guest Mode limits (from Telegram, not the bot):
+
+- Telegram allows the bot **exactly one** reply per mention, so there's no live
+  progress in the chat — just a single final message when the transfer finishes.
+- As a convenience, if you've started the bot in a private chat, it also DMs you live
+  progress. This is skipped silently if it can't reach you.
+
+Either way, replying to something that isn't a supported audio file sends a short hint.
+
 ### Whitelist management (admins)
 
 Admins — the IDs listed in `ALLOWED_USER_IDS` — can manage both whitelists live:

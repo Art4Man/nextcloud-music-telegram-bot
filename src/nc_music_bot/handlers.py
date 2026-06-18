@@ -1,15 +1,24 @@
 """Telegram command handlers + the receive→upload→scan pipeline."""
 
+import contextlib
 import logging
 import shutil
+import uuid
 from typing import cast
 
-from telegram import Message, Update
+from telegram import (
+    InlineQueryResultArticle,
+    InputTextMessageContent,
+    Message,
+    MessageEntity,
+    Update,
+)
+from telegram.error import BadRequest, Forbidden
 from telegram.ext import ContextTypes
 
 from .config import Settings
 from .destination import NextcloudDestination
-from .download import download_media
+from .download import download_media, is_supported_audio
 from .errors import UserFacingError
 from .progress import UploadProgressReporter
 from .whitelist import Whitelist
@@ -21,6 +30,11 @@ HELP_TEXT = (
     "/myid — show your Telegram user ID (for the whitelist)\n"
     "/status — check the connection to the music server\n"
     "/help — this message"
+)
+
+GUEST_HINT_TEXT = (
+    "I can only add audio files. Reply to a song — sent as music or as a file "
+    "(.mp3, .flac, .m4a, .ogg, …) — and mention me to add it to the library."
 )
 
 ADMIN_HELP_TEXT = (
@@ -239,49 +253,150 @@ async def cmd_rmbot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await message.reply_text("Nothing removed (not in the list).")
 
 
-async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """The whole pipeline: ack → download → SFTP upload → occ scan → reply.
+async def _run_pipeline(
+    media_message: Message,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    status: Message | None,
+    log_label: str,
+) -> str:
+    """Download → SFTP upload → occ scan, returning the final reply text.
 
     Stateless by construction — the temp directory is removed in `finally`,
-    success or not.
+    success or not. When `status` is given, live progress is edited into it;
+    otherwise the transfer runs silently. Raises `UserFacingError` for failures
+    whose message is safe to relay.
     """
-    message = update.effective_message
-    if message is None:
-        return
-    uid = update.effective_user.id if update.effective_user else "unknown"
     settings = _settings(context)
     destination = _destination(context)
-    status = await message.reply_text("⬇️ Receiving…")
     workdir = None
     try:
-        local, filename = await download_media(message, settings)
+        local, filename = await download_media(media_message, settings)
         workdir = local.parent
-        log.info("Upload started — user %s: %s", uid, filename)
-        await status.edit_text(f"📤 Uploading {filename} …")
-        reporter = UploadProgressReporter(status, filename)
+        log.info("Upload started — %s: %s", log_label, filename)
+        reporter = None
+        if status is not None:
+            await status.edit_text(f"📤 Uploading {filename} …")
+            reporter = UploadProgressReporter(status, filename)
         try:
             remote_name = await destination.upload(local, filename, progress=reporter)
         finally:
-            await reporter.finish()
+            if reporter is not None:
+                await reporter.finish()
         reply = f"✅ Added {remote_name}"
         if settings.run_scan:
-            await status.edit_text(f"🔍 Indexing {remote_name} …")
+            if status is not None:
+                await status.edit_text(f"🔍 Indexing {remote_name} …")
             scan = await destination.scan()
             if not scan.ok:
                 reply = f"⚠️ Uploaded {remote_name}, but the library scan failed: {scan.detail}"
             elif scan.new_tracks is not None:
                 reply = f"{reply} — {scan.new_tracks} track(s) indexed"
-        log.info("Transfer complete — user %s: %s", uid, remote_name)
-        await status.edit_text(reply)
-    except UserFacingError as exc:
-        log.warning("Transfer failed — user %s: %s", uid, exc)
-        await status.edit_text(f"❌ {exc}")
-    except Exception:
-        log.exception("Transfer failed — user %s", uid)
-        await status.edit_text("❌ Transfer failed — see the bot logs for details.")
+        log.info("Transfer complete — %s: %s", log_label, remote_name)
+        return reply
     finally:
         if workdir is not None:
             shutil.rmtree(workdir, ignore_errors=True)
+
+
+async def _finish_upload(
+    target: Message,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    status: Message,
+    log_label: str,
+) -> None:
+    """Upload `target`'s audio, editing live progress + the result into `status`."""
+    try:
+        reply = await _run_pipeline(target, context, status=status, log_label=log_label)
+    except UserFacingError as exc:
+        log.warning("Transfer failed — %s: %s", log_label, exc)
+        reply = f"❌ {exc}"
+    except Exception:
+        log.exception("Transfer failed — %s", log_label)
+        reply = "❌ Transfer failed — see the bot logs for details."
+    with contextlib.suppress(Forbidden, BadRequest):
+        await status.edit_text(reply)
+
+
+def _mentions_bot(message: Message, username: str | None) -> bool:
+    if not username:
+        return False
+    handle = f"@{username}".lower()
+    mentions = {
+        **message.parse_entities([MessageEntity.MENTION]),
+        **message.parse_caption_entities([MessageEntity.MENTION]),
+    }
+    return any(text.lower() == handle for text in mentions.values())
+
+
+async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Ack → run the upload pipeline → reply, for audio sent directly to the bot."""
+    message = update.effective_message
+    if message is None:
+        return
+    uid = update.effective_user.id if update.effective_user else "unknown"
+    try:
+        status = await message.reply_text("⬇️ Receiving…")
+    except (Forbidden, BadRequest) as exc:
+        log.warning("Can't post for user %s (%s) — skipping", uid, exc)
+        return
+    await _finish_upload(message, context, status=status, log_label=f"user {uid}")
+
+
+def _guest_result(text: str) -> InlineQueryResultArticle:
+    return InlineQueryResultArticle(
+        id=uuid.uuid4().hex,
+        title="nc-music-bot",
+        input_message_content=InputTextMessageContent(message_text=text),
+    )
+
+
+async def handle_guest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Guest-mode upload: a whitelisted user replies to a song and mentions the bot.
+
+    Works in chats the bot is not a member of. Telegram allows exactly one reply
+    per trigger (`answerGuestQuery`), so the whole pipeline runs before that single
+    reply; live progress is best-effort DM'd to the caller's private chat with the
+    bot when reachable.
+    """
+    gm = update.guest_message
+    if gm is None:
+        return
+    caller = gm.guest_bot_caller_user
+    if caller is None or not _whitelist(context).is_allowed_user(caller.id):
+        cid = caller.id if caller else "unknown"
+        log.warning("Rejected guest upload from non-whitelisted user %s", cid)
+        await gm.answer_guest_query(
+            _guest_result(
+                f"Not authorized. Your Telegram ID is {cid} — "
+                "it must be added to ALLOWED_USER_IDS before you can use this bot."
+            )
+        )
+        return
+    target = gm.reply_to_message
+    if target is None or not is_supported_audio(target):
+        log.info("Guest trigger from user %s without a supported audio reply", caller.id)
+        await gm.answer_guest_query(_guest_result(GUEST_HINT_TEXT))
+        return
+
+    dm: Message | None = None
+    try:
+        dm = await context.bot.send_message(caller.id, "⬇️ Receiving…")
+    except (Forbidden, BadRequest):
+        dm = None
+    try:
+        reply = await _run_pipeline(target, context, status=dm, log_label=f"guest user {caller.id}")
+    except UserFacingError as exc:
+        log.warning("Guest transfer failed — user %s: %s", caller.id, exc)
+        reply = f"❌ {exc}"
+    except Exception:
+        log.exception("Guest transfer failed — user %s", caller.id)
+        reply = "❌ Transfer failed — see the bot logs for details."
+    await gm.answer_guest_query(_guest_result(reply))
+    if dm is not None:
+        with contextlib.suppress(Forbidden, BadRequest):
+            await dm.edit_text(reply)
 
 
 async def handle_unauthorized(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -300,20 +415,47 @@ async def handle_unauthorized(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def handle_unsupported(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Reply to a whitelisted user who sent something that isn't an audio file.
+    """Handle a whitelisted user's non-audio message.
 
-    Covers links, plain text, photos, videos, stickers — anything that isn't
-    audio or a known command. Keeps the user from staring at silence.
+    If the message replies to a supported audio message and mentions the bot,
+    that replied-to song is uploaded — this is the in-group equivalent of guest
+    mode, for chats the bot is a member of. Otherwise (links, plain text, photos,
+    stickers, …) the user gets a short hint so they aren't left in silence.
     """
     message = update.effective_message
-    if message is None:
+    user = update.effective_user
+    if message is None or user is None:
         return
-    uid = update.effective_user.id if update.effective_user else "unknown"
+    uid = user.id
+    target = message.reply_to_message
+    if (
+        target is not None
+        and is_supported_audio(target)
+        and _mentions_bot(message, context.bot.username)
+    ):
+        log.info("Reply-upload trigger from user %s", uid)
+        where = f" in '{message.chat.title}'" if message.chat.title else ""
+        try:
+            await context.bot.send_message(
+                uid,
+                f"🎵 You mentioned me on a song{where} — adding it to the music library…",
+            )
+            status = await context.bot.send_message(uid, "⬇️ Receiving…")
+        except (Forbidden, BadRequest) as exc:
+            log.warning(
+                "Can't DM user %s (%s) — they must start a private chat with the bot first",
+                uid,
+                exc,
+            )
+            return
+        await _finish_upload(target, context, status=status, log_label=f"user {uid}")
+        return
     log.info("Ignoring non-audio message from user %s", uid)
-    await message.reply_text(
-        "That doesn't look like an audio file. Send me a song as music or as a "
-        "file (.mp3, .flac, .m4a, .ogg, …) — links and plain text aren't supported."
-    )
+    with contextlib.suppress(Forbidden, BadRequest):
+        await message.reply_text(
+            "That doesn't look like an audio file. Reply to a song and mention me to add "
+            "it, or send a song as music or a file (.mp3, .flac, .m4a, .ogg, …)."
+        )
 
 
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
