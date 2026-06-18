@@ -4,7 +4,7 @@ import logging
 import shutil
 from typing import cast
 
-from telegram import Update
+from telegram import Message, Update
 from telegram.ext import ContextTypes
 
 from .config import Settings
@@ -43,6 +43,49 @@ def _destination(context: ContextTypes.DEFAULT_TYPE) -> NextcloudDestination:
 
 def _whitelist(context: ContextTypes.DEFAULT_TYPE) -> Whitelist:
     return cast(Whitelist, context.bot_data["whitelist"])
+
+
+def describe_message(message: Message) -> str:
+    """A short, log-safe description of what a message carries."""
+    if message.audio is not None:
+        a = message.audio
+        return f"audio file_name={a.file_name!r} mime={a.mime_type} size={a.file_size}"
+    if message.document is not None:
+        d = message.document
+        return f"document file_name={d.file_name!r} mime={d.mime_type} size={d.file_size}"
+    if message.voice is not None:
+        return f"voice size={message.voice.file_size}"
+    if message.video is not None:
+        return f"video size={message.video.file_size}"
+    if message.photo:
+        return "photo"
+    if message.sticker is not None:
+        return "sticker"
+    if message.animation is not None:
+        return "animation"
+    if message.text is not None:
+        text = message.text
+        snippet = text if len(text) <= 80 else f"{text[:79]}…"
+        return f"text {snippet!r}"
+    return "other"
+
+
+async def log_inbound(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log every inbound message with its sender so problems are traceable."""
+    message = update.effective_message
+    if message is None:
+        return
+    user = update.effective_user
+    uid = user.id if user else "unknown"
+    username = f"@{user.username}" if user and user.username else "-"
+    trusted = bool(_whitelist(context).audio_filter.check_update(update))
+    log.info(
+        "Inbound from %s (%s, %s): %s",
+        uid,
+        username,
+        "trusted" if trusted else "untrusted",
+        describe_message(message),
+    )
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

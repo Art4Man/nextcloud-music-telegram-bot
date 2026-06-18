@@ -71,6 +71,7 @@ def build_application(settings: Settings) -> Application:
     app.bot_data["whitelist"] = whitelist
 
     trusted = whitelist.audio_filter
+    app.add_handler(MessageHandler(filters.ALL, handlers.log_inbound), group=-1)
     app.add_handler(CommandHandler(["start", "help"], handlers.cmd_help))
     app.add_handler(CommandHandler("myid", handlers.cmd_myid))
     app.add_handler(CommandHandler("status", handlers.cmd_status, filters=whitelist.users))
