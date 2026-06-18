@@ -5,6 +5,7 @@ validators below so a misconfigured deployment fails at startup, not mid-upload.
 """
 
 import tempfile
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Self
 
@@ -16,6 +17,13 @@ MB = 1024 * 1024
 # The standard (cloud) Bot API refuses `getFile` for anything larger than this.
 # Only a self-hosted telegram-bot-api lifts the cap (to 2 GB).
 CLOUD_API_MAX_MB = 20
+
+
+class AppMode(StrEnum):
+    """Where uploads go: the real Nextcloud destination, or a throwaway local dir."""
+
+    production = "production"
+    stage = "stage"
 
 
 class Settings(BaseSettings):
@@ -34,14 +42,21 @@ class Settings(BaseSettings):
     max_file_mb: int = 2000
     telegram_api_base_url: str | None = None
 
-    # ── Destination, reached over Tailscale ───────────────────────────────
-    dest_host: str
+    # ── Mode ──────────────────────────────────────────────────────────────
+    # `stage` swaps the Tailscale/SFTP destination for a local throwaway dir.
+    app_mode: AppMode = AppMode.production
+    stage_dir: Path | None = None
+
+    # ── Destination, reached over Tailscale (production mode) ──────────────
+    # Optional defaults so a stage `.env` needs none of them; production
+    # presence is enforced in `_cross_field_rules`.
+    dest_host: str = ""
     dest_ssh_port: int = 22
     dest_ssh_user: str = "root"
     dest_ssh_key_path: Path | None = None
     dest_ssh_password: str | None = None
     dest_known_hosts: Path | None = None
-    dest_path: str
+    dest_path: str = ""
 
     # ── Nextcloud scan after each upload ──────────────────────────────────
     run_scan: bool = True
@@ -79,18 +94,32 @@ class Settings(BaseSettings):
     @field_validator("dest_path")
     @classmethod
     def _require_absolute_dest(cls, value: str) -> str:
+        if not value:
+            return ""
         value = value.rstrip("/") or "/"
         if not value.startswith("/"):
             raise ValueError("DEST_PATH must be an absolute path on the destination")
         return value
 
-    @field_validator("dest_ssh_key_path", "dest_known_hosts", "temp_dir", "whitelist_store_path")
+    @field_validator(
+        "dest_ssh_key_path", "dest_known_hosts", "temp_dir", "whitelist_store_path", "stage_dir"
+    )
     @classmethod
     def _expand_user(cls, value: Path | None) -> Path | None:
         return value.expanduser() if value is not None else None
 
     @model_validator(mode="after")
     def _cross_field_rules(self) -> Self:
+        if self.app_mode is AppMode.stage:
+            return self
+        if not self.dest_host:
+            raise ValueError(
+                "DEST_HOST is required in production mode (set APP_MODE=stage to skip)"
+            )
+        if not self.dest_path:
+            raise ValueError(
+                "DEST_PATH is required in production mode (set APP_MODE=stage to skip)"
+            )
         if not self.dest_ssh_key_path and not self.dest_ssh_password:
             raise ValueError(
                 "set DEST_SSH_KEY_PATH (recommended) or DEST_SSH_PASSWORD to authenticate"
@@ -101,6 +130,11 @@ class Settings(BaseSettings):
                 "(e.g. admin/files/Music); set RUN_SCAN=false for plain SFTP destinations"
             )
         return self
+
+    @property
+    def effective_stage_dir(self) -> Path:
+        """Where stage-mode uploads land; defaults to a `stage` subdir of TEMP_DIR."""
+        return self.stage_dir or self.temp_dir / "stage"
 
     @property
     def max_file_bytes(self) -> int:

@@ -67,6 +67,22 @@ uv run python -m nc_music_bot
 Send `/myid` to the bot to learn your numeric Telegram ID for `ALLOWED_USER_IDS`.
 Then send it any audio file. `/status` re-runs the destination health check from Telegram.
 
+### Try it locally (stage mode)
+
+No Tailscale, SSH, or Nextcloud — useful for hacking on the bot or testing a PR. Set
+`APP_MODE=stage` and the only other settings you need are a bot token and `ALLOWED_USER_IDS`:
+
+```bash
+uv sync
+printf 'APP_MODE=stage\nTELEGRAM_BOT_TOKEN=<token>\nALLOWED_USER_IDS=<your-id>\n' > .env
+uv run python -m nc_music_bot --check   # confirms stage mode + a writable stage dir
+uv run python -m nc_music_bot
+```
+
+Songs you send are copied into `<TEMP_DIR>/stage` (default `/tmp/nc-music-bot/stage`, override
+with `STAGE_DIR`) and the bot replies `✅ Added <name>`. The stage directory is wiped clean on
+every restart, so nothing accumulates.
+
 ### Auto-relaying another bot's audio
 
 The bot can pick up MP3s another bot posts in a shared group (e.g. a Spotify
@@ -127,18 +143,20 @@ template). Env vars override `.env`.
 |---|---|---|---|
 | `TELEGRAM_BOT_TOKEN` | to run | — | Token from @BotFather (`--check` works without it) |
 | `ALLOWED_USER_IDS` | yes | — | Comma-separated numeric Telegram IDs allowed to use the bot |
+| `APP_MODE` | no | `production` | `stage` copies uploads to a local dir instead of the Nextcloud destination (no Tailscale/SSH; all `DEST_*`/scan settings ignored) |
+| `STAGE_DIR` | no | `<TEMP_DIR>/stage` | Stage-mode target directory; wiped on every restart |
 | `SOURCE_BOT_USERNAMES` | no | — | Comma-separated bot @usernames whose audio is auto-relayed (needs Bot-to-Bot Communication Mode in @BotFather + the bot as group admin or with Group Privacy off) |
 | `WHITELIST_STORE_PATH` | no | — | JSON file persisting runtime whitelist changes (`/allow`, `/addbot`, …); unset = in-memory only. Put on a mounted volume for Docker |
 | `MAX_FILE_MB` | no | `2000` | Reject files larger than this |
 | `TELEGRAM_API_BASE_URL` | no | — | Self-hosted telegram-bot-api URL; unlocks 2 GB downloads |
 | `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` | large mode | — | Used by the bot-api helper container only |
-| `DEST_HOST` | yes | — | Tailnet IP or MagicDNS name of the destination |
+| `DEST_HOST` | production | — | Tailnet IP or MagicDNS name of the destination |
 | `DEST_SSH_PORT` | no | `22` | SSH port |
 | `DEST_SSH_USER` | no | `root` | SSH user (snap Nextcloud's `occ` requires root) |
 | `DEST_SSH_KEY_PATH` | one of | — | Private key path (recommended); Docker installs expect `/secrets/nc-music-bot_ed25519` |
 | `DEST_SSH_PASSWORD` | one of | — | Password auth alternative — set this instead of `DEST_SSH_KEY_PATH`; requires `PasswordAuthentication yes` in `sshd_config` on the destination |
 | `DEST_KNOWN_HOSTS` | no | pin on first connect | known_hosts file for host-key verification |
-| `DEST_PATH` | yes | — | Absolute upload directory on the destination |
+| `DEST_PATH` | production | — | Absolute upload directory on the destination |
 | `RUN_SCAN` | no | `true` | Run occ scans after upload (off = plain SFTP drop) |
 | `NEXTCLOUD_OCC` | no | `nextcloud.occ` | occ command (snap default; else e.g. `php /var/www/nextcloud/occ`) |
 | `NEXTCLOUD_USER` | no | `admin` | Nextcloud user owning the library |

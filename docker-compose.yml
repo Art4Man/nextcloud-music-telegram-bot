@@ -7,6 +7,8 @@
 # Large-file mode (up to 2 GB):  docker compose --profile large up -d
 #   (requires TELEGRAM_API_ID / TELEGRAM_API_HASH in .env and
 #    TELEGRAM_API_BASE_URL=http://127.0.0.1:8081)
+# Stage mode (no destination):   set APP_MODE=stage in .env — uploads go to a local
+#   throwaway dir, so the tailnet and the ./secrets volume are not needed.
 
 services:
   bot:

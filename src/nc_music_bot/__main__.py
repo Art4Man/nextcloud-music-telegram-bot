@@ -6,7 +6,7 @@ import sys
 
 from pydantic import ValidationError
 
-from .config import Settings
+from .config import AppMode, Settings
 from .logging_conf import configure_logging
 
 
@@ -24,15 +24,18 @@ def _load_settings() -> Settings:
 
 
 async def _run_check(settings: Settings) -> int:
-    from .destination import NextcloudDestination
+    from .destination import choose_destination
 
-    print(
-        f"Destination: {settings.dest_ssh_user}@{settings.dest_host}:"
-        f"{settings.dest_ssh_port}{settings.dest_path}"
-    )
+    if settings.app_mode is AppMode.stage:
+        print(f"Destination: stage dir {settings.effective_stage_dir}")
+    else:
+        print(
+            f"Destination: {settings.dest_ssh_user}@{settings.dest_host}:"
+            f"{settings.dest_ssh_port}{settings.dest_path}"
+        )
     if not settings.telegram_bot_token:
         print("note: TELEGRAM_BOT_TOKEN is empty — fine for --check, required to run.")
-    items = await NextcloudDestination(settings).check()
+    items = await choose_destination(settings).check()
     for item in items:
         mark = "ok " if item.ok else "FAIL"
         print(f"[{mark}] {item.label}" + (f" — {item.detail}" if item.detail else ""))

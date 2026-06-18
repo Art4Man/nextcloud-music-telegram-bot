@@ -17,7 +17,7 @@ from telegram.error import BadRequest, Forbidden
 from telegram.ext import ContextTypes
 
 from .config import Settings
-from .destination import NextcloudDestination
+from .destination import Destination
 from .download import download_media, is_supported_audio
 from .errors import UserFacingError
 from .progress import UploadProgressReporter
@@ -51,8 +51,8 @@ def _settings(context: ContextTypes.DEFAULT_TYPE) -> Settings:
     return cast(Settings, context.bot_data["settings"])
 
 
-def _destination(context: ContextTypes.DEFAULT_TYPE) -> NextcloudDestination:
-    return cast(NextcloudDestination, context.bot_data["destination"])
+def _destination(context: ContextTypes.DEFAULT_TYPE) -> Destination:
+    return cast(Destination, context.bot_data["destination"])
 
 
 def _whitelist(context: ContextTypes.DEFAULT_TYPE) -> Whitelist:

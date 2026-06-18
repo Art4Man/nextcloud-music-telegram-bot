@@ -12,8 +12,8 @@ from telegram.ext import (
 )
 
 from . import handlers
-from .config import Settings
-from .destination import NextcloudDestination
+from .config import AppMode, Settings
+from .destination import choose_destination
 from .download import AUDIO_EXTENSIONS
 from .whitelist import Whitelist
 
@@ -34,6 +34,7 @@ async def _post_init(app: Application) -> None:
             BotCommand("status", "Check the connection to the music server"),
         ]
     )
+    await app.bot_data["destination"].prepare()
 
 
 def build_application(settings: Settings) -> Application:
@@ -55,7 +56,7 @@ def build_application(settings: Settings) -> Application:
     app = builder.build()
     whitelist = Whitelist(settings)
     app.bot_data["settings"] = settings
-    app.bot_data["destination"] = NextcloudDestination(settings)
+    app.bot_data["destination"] = choose_destination(settings)
     app.bot_data["whitelist"] = whitelist
 
     trusted = whitelist.audio_filter
@@ -80,11 +81,14 @@ def build_application(settings: Settings) -> Application:
 
 def run_bot(settings: Settings) -> None:
     app = build_application(settings)
-    log.info(
-        "Relay ready: Telegram -> %s@%s:%s%s",
-        settings.dest_ssh_user,
-        settings.dest_host,
-        settings.dest_ssh_port,
-        settings.dest_path,
-    )
+    if settings.app_mode is AppMode.stage:
+        log.info("Relay ready (stage): Telegram -> %s", settings.effective_stage_dir)
+    else:
+        log.info(
+            "Relay ready: Telegram -> %s@%s:%s%s",
+            settings.dest_ssh_user,
+            settings.dest_host,
+            settings.dest_ssh_port,
+            settings.dest_path,
+        )
     app.run_polling(allowed_updates=Update.ALL_TYPES)
