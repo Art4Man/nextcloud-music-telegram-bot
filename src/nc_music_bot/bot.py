@@ -11,6 +11,8 @@ from telegram.ext import (
     filters,
 )
 
+from nc_music_bot.queue import QueueManager
+
 from . import handlers
 from .config import AppMode, Settings
 from .destination import choose_destination
@@ -56,8 +58,8 @@ def build_application(settings: Settings) -> Application:
     app = builder.build()
     whitelist = Whitelist(settings)
     app.bot_data["settings"] = settings
-    app.bot_data["destination"] = choose_destination(settings)
-    app.bot_data["whitelist"] = whitelist
+    app.bot_data["destination"] = NextcloudDestination(settings)
+    app.bot_data["queue_manager"] = QueueManager(handlers.process_audio_job,)
 
     trusted = whitelist.audio_filter
     app.add_handler(MessageHandler(filters.ALL, handlers.log_inbound), group=-1)
@@ -77,6 +79,7 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(MessageHandler(filters.UpdateType.GUEST_MESSAGE, handlers.handle_guest))
     app.add_error_handler(handlers.on_error)
     return app
+
 
 
 def run_bot(settings: Settings) -> None:

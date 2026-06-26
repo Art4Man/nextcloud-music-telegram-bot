@@ -6,14 +6,7 @@ import shutil
 import uuid
 from typing import cast
 
-from telegram import (
-    InlineQueryResultArticle,
-    InputTextMessageContent,
-    Message,
-    MessageEntity,
-    Update,
-)
-from telegram.error import BadRequest, Forbidden
+from telegram import Message, Update
 from telegram.ext import ContextTypes
 
 from .config import Settings
@@ -21,7 +14,7 @@ from .destination import Destination
 from .download import download_media, is_supported_audio
 from .errors import UserFacingError
 from .progress import UploadProgressReporter
-from .whitelist import Whitelist
+from .queue import QueueManager
 
 log = logging.getLogger(__name__)
 
@@ -102,6 +95,10 @@ async def log_inbound(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     )
 
 
+
+def _queue_manager(context: ContextTypes.DEFAULT_TYPE) -> QueueManager:
+    return cast(QueueManager, context.bot_data["queue_manager"])
+
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     if message is None:
@@ -169,234 +166,85 @@ async def cmd_whitelist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def cmd_allow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _require_admin(update, context):
         return
-    message = update.effective_message
-    assert message is not None
-    ids, bad = _parse_user_ids(context.args or [])
-    if not ids and not bad:
-        await message.reply_text("Usage: /allow <user_id> [user_id…]")
-        return
-    wl = _whitelist(context)
-    added = [uid for uid in ids if wl.allow_user(uid)]
-    lines = []
-    if added:
-        lines.append("Allowed: " + ", ".join(str(uid) for uid in added))
-    already = [uid for uid in ids if uid not in added]
-    if already:
-        lines.append("Already allowed: " + ", ".join(str(uid) for uid in already))
-    if bad:
-        lines.append("Not numeric IDs: " + ", ".join(bad))
-    await message.reply_text("\n".join(lines))
+
+    queue_manager = _queue_manager(context)
+
+    await queue_manager.enqueue(
+        update,
+        context,
+    )
 
 
-async def cmd_deny(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _require_admin(update, context):
-        return
-    message = update.effective_message
-    assert message is not None
-    ids, bad = _parse_user_ids(context.args or [])
-    if not ids and not bad:
-        await message.reply_text("Usage: /deny <user_id> [user_id…]")
-        return
-    wl = _whitelist(context)
-    removed: list[int] = []
-    skipped: list[str] = []
-    for uid in ids:
-        try:
-            if wl.deny_user(uid):
-                removed.append(uid)
-            else:
-                skipped.append(f"{uid} (not in list)")
-        except ValueError as exc:
-            skipped.append(f"{uid} — {exc}")
-    lines = []
-    if removed:
-        lines.append("Removed: " + ", ".join(str(uid) for uid in removed))
-    if skipped:
-        lines.append("Skipped: " + "; ".join(skipped))
-    if bad:
-        lines.append("Not numeric IDs: " + ", ".join(bad))
-    await message.reply_text("\n".join(lines))
-
-
-async def cmd_addbot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _require_admin(update, context):
-        return
-    message = update.effective_message
-    assert message is not None
-    args = context.args or []
-    if not args:
-        await message.reply_text("Usage: /addbot <@username> [@username…]")
-        return
-    wl = _whitelist(context)
-    added = [name for arg in args if (name := wl.add_bot(arg))]
-    if added:
-        await message.reply_text("Now relaying audio from: " + ", ".join(f"@{n}" for n in added))
-    else:
-        await message.reply_text("Nothing added (already present or empty).")
-
-
-async def cmd_rmbot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _require_admin(update, context):
-        return
-    message = update.effective_message
-    assert message is not None
-    args = context.args or []
-    if not args:
-        await message.reply_text("Usage: /rmbot <@username> [@username…]")
-        return
-    wl = _whitelist(context)
-    removed = [name for arg in args if (name := wl.remove_bot(arg))]
-    if removed:
-        names = ", ".join(f"@{n}" for n in removed)
-        await message.reply_text(f"Stopped relaying audio from: {names}")
-    else:
-        await message.reply_text("Nothing removed (not in the list).")
-
-
-async def _run_pipeline(
-    media_message: Message,
+async def process_audio_job(
+    update: Update,
     context: ContextTypes.DEFAULT_TYPE,
-    *,
-    status: Message | None,
-    log_label: str,
-) -> str:
-    """Download → SFTP upload → occ scan, returning the final reply text.
+    status: Message,
+) -> None:
+    message = update.effective_message
+    if message is None:
+        return
 
-    Stateless by construction — the temp directory is removed in `finally`,
-    success or not. When `status` is given, live progress is edited into it;
-    otherwise the transfer runs silently. Raises `UserFacingError` for failures
-    whose message is safe to relay.
-    """
+    uid = update.effective_user.id if update.effective_user else "unknown"
+
     settings = _settings(context)
     destination = _destination(context)
+
     workdir = None
+
     try:
         local, filename = await download_media(media_message, settings)
         workdir = local.parent
-        log.info("Upload started — %s: %s", log_label, filename)
-        reporter = None
-        if status is not None:
-            await status.edit_text(f"📤 Uploading {filename} …")
-            reporter = UploadProgressReporter(status, filename)
+
+        log.info("Upload started — user %s: %s", uid, filename)
+
+        await status.edit_text(f"📤 Uploading {filename} …")
+
+        reporter = UploadProgressReporter(status, filename)
+
         try:
-            remote_name = await destination.upload(local, filename, progress=reporter)
+            remote_name = await destination.upload(
+                local,
+                filename,
+                progress=reporter,
+            )
         finally:
-            if reporter is not None:
-                await reporter.finish()
+            await reporter.finish()
+
         reply = f"✅ Added {remote_name}"
+
         if settings.run_scan:
-            if status is not None:
-                await status.edit_text(f"🔍 Indexing {remote_name} …")
+            await status.edit_text(f"🔍 Indexing {remote_name} …")
+
             scan = await destination.scan()
+
             if not scan.ok:
-                reply = f"⚠️ Uploaded {remote_name}, but the library scan failed: {scan.detail}"
+                reply = (
+                    f"⚠️ Uploaded {remote_name}, "
+                    f"but the library scan failed: {scan.detail}"
+                )
             elif scan.new_tracks is not None:
                 reply = f"{reply} — {scan.new_tracks} track(s) indexed"
-        log.info("Transfer complete — %s: %s", log_label, remote_name)
-        return reply
+
+        log.info("Transfer complete — user %s: %s", uid, remote_name)
+
+        await status.edit_text(reply)
+
+    except UserFacingError as exc:
+        log.warning("Transfer failed — user %s: %s", uid, exc)
+        await status.edit_text(f"❌ {exc}")
+
+    except Exception:
+        log.exception("Transfer failed — user %s", uid)
+        await status.edit_text(
+            "❌ Transfer failed — see the bot logs for details."
+        )
+
     finally:
         if workdir is not None:
             shutil.rmtree(workdir, ignore_errors=True)
 
 
-async def _finish_upload(
-    target: Message,
-    context: ContextTypes.DEFAULT_TYPE,
-    *,
-    status: Message,
-    log_label: str,
-) -> None:
-    """Upload `target`'s audio, editing live progress + the result into `status`."""
-    try:
-        reply = await _run_pipeline(target, context, status=status, log_label=log_label)
-    except UserFacingError as exc:
-        log.warning("Transfer failed — %s: %s", log_label, exc)
-        reply = f"❌ {exc}"
-    except Exception:
-        log.exception("Transfer failed — %s", log_label)
-        reply = "❌ Transfer failed — see the bot logs for details."
-    with contextlib.suppress(Forbidden, BadRequest):
-        await status.edit_text(reply)
 
-
-def _mentions_bot(message: Message, username: str | None) -> bool:
-    if not username:
-        return False
-    handle = f"@{username}".lower()
-    mentions = {
-        **message.parse_entities([MessageEntity.MENTION]),
-        **message.parse_caption_entities([MessageEntity.MENTION]),
-    }
-    return any(text.lower() == handle for text in mentions.values())
-
-
-async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Ack → run the upload pipeline → reply, for audio sent directly to the bot."""
-    message = update.effective_message
-    if message is None:
-        return
-    uid = update.effective_user.id if update.effective_user else "unknown"
-    try:
-        status = await message.reply_text("⬇️ Receiving…")
-    except (Forbidden, BadRequest) as exc:
-        log.warning("Can't post for user %s (%s) — skipping", uid, exc)
-        return
-    await _finish_upload(message, context, status=status, log_label=f"user {uid}")
-
-
-def _guest_result(text: str) -> InlineQueryResultArticle:
-    return InlineQueryResultArticle(
-        id=uuid.uuid4().hex,
-        title="nc-music-bot",
-        input_message_content=InputTextMessageContent(message_text=text),
-    )
-
-
-async def handle_guest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Guest-mode upload: a whitelisted user replies to a song and mentions the bot.
-
-    Works in chats the bot is not a member of. Telegram allows exactly one reply
-    per trigger (`answerGuestQuery`), so the whole pipeline runs before that single
-    reply; live progress is best-effort DM'd to the caller's private chat with the
-    bot when reachable.
-    """
-    gm = update.guest_message
-    if gm is None:
-        return
-    caller = gm.guest_bot_caller_user
-    if caller is None or not _whitelist(context).is_allowed_user(caller.id):
-        cid = caller.id if caller else "unknown"
-        log.warning("Rejected guest upload from non-whitelisted user %s", cid)
-        await gm.answer_guest_query(
-            _guest_result(
-                f"Not authorized. Your Telegram ID is {cid} — "
-                "it must be added to ALLOWED_USER_IDS before you can use this bot."
-            )
-        )
-        return
-    target = gm.reply_to_message
-    if target is None or not is_supported_audio(target):
-        log.info("Guest trigger from user %s without a supported audio reply", caller.id)
-        await gm.answer_guest_query(_guest_result(GUEST_HINT_TEXT))
-        return
-
-    dm: Message | None = None
-    try:
-        dm = await context.bot.send_message(caller.id, "⬇️ Receiving…")
-    except (Forbidden, BadRequest):
-        dm = None
-    try:
-        reply = await _run_pipeline(target, context, status=dm, log_label=f"guest user {caller.id}")
-    except UserFacingError as exc:
-        log.warning("Guest transfer failed — user %s: %s", caller.id, exc)
-        reply = f"❌ {exc}"
-    except Exception:
-        log.exception("Guest transfer failed — user %s", caller.id)
-        reply = "❌ Transfer failed — see the bot logs for details."
-    await gm.answer_guest_query(_guest_result(reply))
-    if dm is not None:
-        with contextlib.suppress(Forbidden, BadRequest):
-            await dm.edit_text(reply)
 
 
 async def handle_unauthorized(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
