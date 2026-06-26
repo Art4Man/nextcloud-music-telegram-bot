@@ -12,6 +12,38 @@ from .naming import build_filename
 
 log = logging.getLogger(__name__)
 
+AUDIO_EXTENSIONS: tuple[str, ...] = (
+    "mp3",
+    "flac",
+    "m4a",
+    "ogg",
+    "opus",
+    "aac",
+    "wav",
+    "wma",
+    "alac",
+    "aiff",
+    "mka",
+)
+
+
+def is_supported_audio(message: Message) -> bool:
+    """Whether a message carries audio this bot will accept.
+
+    Mirrors the registration-time `AUDIO_MESSAGE` filter so the guest handler can
+    test a replied-to message, which never passes through that filter itself.
+    """
+    if message.audio is not None:
+        return True
+    doc = message.document
+    if doc is None:
+        return False
+    if doc.mime_type and doc.mime_type.startswith("audio/"):
+        return True
+    name = doc.file_name or ""
+    extension = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    return extension in AUDIO_EXTENSIONS
+
 
 def pick_media(message: Message) -> Audio | Document:
     media = message.audio or message.document

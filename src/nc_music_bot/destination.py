@@ -11,11 +11,11 @@ import shlex
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import asyncssh
 
-from .config import Settings
+from .config import AppMode, Settings
 from .errors import UserFacingError
 from .naming import is_safe_remote_name, numbered_variant
 
@@ -46,9 +46,35 @@ class CheckItem:
     detail: str = ""
 
 
+class Destination(Protocol):
+    """The upload target: production Nextcloud over SFTP, or a local stage dir."""
+
+    async def prepare(self) -> None: ...
+
+    async def upload(
+        self, local: Path, filename: str, progress: Callable[[int, int], None] | None = None
+    ) -> str: ...
+
+    async def scan(self) -> ScanResult: ...
+
+    async def check(self) -> list[CheckItem]: ...
+
+
+def choose_destination(settings: Settings) -> Destination:
+    """Pick the destination implementation for the configured `APP_MODE`."""
+    if settings.app_mode is AppMode.stage:
+        from .stage import LocalStageDestination
+
+        return LocalStageDestination(settings)
+    return NextcloudDestination(settings)
+
+
 class NextcloudDestination:
     def __init__(self, settings: Settings) -> None:
         self._s = settings
+
+    async def prepare(self) -> None:
+        """Nothing to set up remotely; the destination is reached on demand."""
 
     async def upload(
         self, local: Path, filename: str, progress: Callable[[int, int], None] | None = None

@@ -14,13 +14,18 @@ from telegram.ext import (
 from nc_music_bot.queue import QueueManager
 
 from . import handlers
-from .auth import allowed_users_filter
-from .config import Settings
-from .destination import NextcloudDestination
+from .config import AppMode, Settings
+from .destination import choose_destination
+from .download import AUDIO_EXTENSIONS
+from .whitelist import Whitelist
 
 log = logging.getLogger(__name__)
 
-AUDIO_MESSAGE = filters.AUDIO | filters.Document.AUDIO
+_AUDIO_BY_EXTENSION: filters.BaseFilter = filters.Document.FileExtension(AUDIO_EXTENSIONS[0])
+for _ext in AUDIO_EXTENSIONS[1:]:
+    _AUDIO_BY_EXTENSION |= filters.Document.FileExtension(_ext)
+
+AUDIO_MESSAGE = filters.AUDIO | filters.Document.AUDIO | _AUDIO_BY_EXTENSION
 
 
 async def _post_init(app: Application) -> None:
@@ -31,6 +36,7 @@ async def _post_init(app: Application) -> None:
             BotCommand("status", "Check the connection to the music server"),
         ]
     )
+    await app.bot_data["destination"].prepare()
 
 
 def build_application(settings: Settings) -> Application:
@@ -50,16 +56,27 @@ def build_application(settings: Settings) -> Application:
         log.info("Using self-hosted telegram-bot-api at %s (2 GB downloads)", base)
 
     app = builder.build()
+    whitelist = Whitelist(settings)
     app.bot_data["settings"] = settings
     app.bot_data["destination"] = NextcloudDestination(settings)
     app.bot_data["queue_manager"] = QueueManager(handlers.process_audio_job,)
 
-    allowed = allowed_users_filter(settings)
+    trusted = whitelist.audio_filter
+    app.add_handler(MessageHandler(filters.ALL, handlers.log_inbound), group=-1)
     app.add_handler(CommandHandler(["start", "help"], handlers.cmd_help))
     app.add_handler(CommandHandler("myid", handlers.cmd_myid))
-    app.add_handler(CommandHandler("status", handlers.cmd_status, filters=allowed))
-    app.add_handler(MessageHandler(AUDIO_MESSAGE & allowed, handlers.handle_audio))
-    app.add_handler(MessageHandler(AUDIO_MESSAGE & ~allowed, handlers.handle_unauthorized))
+    app.add_handler(CommandHandler("status", handlers.cmd_status, filters=whitelist.users))
+    app.add_handler(CommandHandler("whitelist", handlers.cmd_whitelist))
+    app.add_handler(CommandHandler("allow", handlers.cmd_allow))
+    app.add_handler(CommandHandler("deny", handlers.cmd_deny))
+    app.add_handler(CommandHandler("addbot", handlers.cmd_addbot))
+    app.add_handler(CommandHandler("rmbot", handlers.cmd_rmbot))
+    app.add_handler(MessageHandler(AUDIO_MESSAGE & trusted, handlers.handle_audio))
+    app.add_handler(MessageHandler(AUDIO_MESSAGE & ~trusted, handlers.handle_unauthorized))
+    app.add_handler(
+        MessageHandler(trusted & ~AUDIO_MESSAGE & ~filters.COMMAND, handlers.handle_unsupported)
+    )
+    app.add_handler(MessageHandler(filters.UpdateType.GUEST_MESSAGE, handlers.handle_guest))
     app.add_error_handler(handlers.on_error)
     return app
 
@@ -67,11 +84,14 @@ def build_application(settings: Settings) -> Application:
 
 def run_bot(settings: Settings) -> None:
     app = build_application(settings)
-    log.info(
-        "Relay ready: Telegram -> %s@%s:%s%s",
-        settings.dest_ssh_user,
-        settings.dest_host,
-        settings.dest_ssh_port,
-        settings.dest_path,
-    )
+    if settings.app_mode is AppMode.stage:
+        log.info("Relay ready (stage): Telegram -> %s", settings.effective_stage_dir)
+    else:
+        log.info(
+            "Relay ready: Telegram -> %s@%s:%s%s",
+            settings.dest_ssh_user,
+            settings.dest_host,
+            settings.dest_ssh_port,
+            settings.dest_path,
+        )
     app.run_polling(allowed_updates=Update.ALL_TYPES)

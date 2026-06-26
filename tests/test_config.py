@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from nc_music_bot.config import CLOUD_API_MAX_MB, MB
+from nc_music_bot.config import CLOUD_API_MAX_MB, MB, AppMode
 
 from .conftest import MakeSettings
 
@@ -48,6 +48,44 @@ def test_scan_path_required_while_scanning(make_settings: MakeSettings) -> None:
 def test_scan_path_optional_when_scan_disabled(make_settings: MakeSettings) -> None:
     settings = make_settings(nextcloud_scan_path=None, run_scan=False)
     assert settings.nextcloud_scan_path is None
+
+
+def test_production_is_the_default_mode(make_settings: MakeSettings) -> None:
+    assert make_settings().app_mode is AppMode.production
+
+
+def test_production_requires_dest_host(make_settings: MakeSettings) -> None:
+    with pytest.raises(ValidationError):
+        make_settings(dest_host="")
+
+
+def test_production_requires_dest_path(make_settings: MakeSettings) -> None:
+    with pytest.raises(ValidationError):
+        make_settings(dest_path="")
+
+
+def test_stage_mode_needs_no_destination_config(make_settings: MakeSettings) -> None:
+    settings = make_settings(
+        app_mode="stage",
+        dest_host="",
+        dest_path="",
+        dest_ssh_password=None,
+        nextcloud_scan_path=None,
+    )
+    assert settings.app_mode is AppMode.stage
+    assert settings.dest_host == ""
+
+
+def test_stage_dir_defaults_under_temp_dir(make_settings: MakeSettings) -> None:
+    settings = make_settings(app_mode="stage")
+    assert settings.effective_stage_dir == settings.temp_dir / "stage"
+
+
+def test_stage_dir_override_and_expands_user(make_settings: MakeSettings) -> None:
+    settings = make_settings(app_mode="stage", stage_dir="~/music-stage")
+    assert settings.stage_dir is not None
+    assert not str(settings.stage_dir).startswith("~")
+    assert settings.effective_stage_dir == settings.stage_dir
 
 
 def test_cloud_api_caps_downloads_at_20mb(make_settings: MakeSettings) -> None:
