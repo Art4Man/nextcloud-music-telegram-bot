@@ -67,6 +67,35 @@ async def test_upload_is_collision_safe(make_settings: MakeSettings, tmp_path: P
     assert (tmp_path / "stage" / "song (1).mp3").exists()
 
 
+async def test_file_exists_sees_staged_files(make_settings: MakeSettings, tmp_path: Path) -> None:
+    dest = _stage(make_settings, tmp_path)
+    await dest.prepare()
+    src = tmp_path / "song.mp3"
+    src.write_bytes(b"x")
+    await dest.upload(src, "song.mp3")
+
+    assert await dest.file_exists("song.mp3")
+    assert not await dest.file_exists("other.mp3")
+
+
+async def test_upload_overwrite_replaces_existing(
+    make_settings: MakeSettings, tmp_path: Path
+) -> None:
+    dest = _stage(make_settings, tmp_path)
+    await dest.prepare()
+    first = tmp_path / "old.mp3"
+    first.write_bytes(b"old")
+    second = tmp_path / "new.mp3"
+    second.write_bytes(b"new")
+    await dest.upload(first, "song.mp3")
+
+    final = await dest.upload(second, "song.mp3", overwrite=True)
+
+    assert final == "song.mp3"
+    assert (tmp_path / "stage" / "song.mp3").read_bytes() == b"new"
+    assert not (tmp_path / "stage" / "song (1).mp3").exists()
+
+
 async def test_upload_rejects_unsafe_name(make_settings: MakeSettings, tmp_path: Path) -> None:
     dest = _stage(make_settings, tmp_path)
     await dest.prepare()

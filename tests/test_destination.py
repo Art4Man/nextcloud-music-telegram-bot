@@ -138,6 +138,54 @@ async def test_upload_avoids_collisions(
     assert final == "song (2).mp3"
 
 
+async def test_file_exists_checks_dest_path(
+    make_settings: MakeSettings, patch_connect: PatchConnect
+) -> None:
+    conn = FakeConn(sftp=FakeSFTP({"/srv/music/song.mp3"}))
+    patch_connect(conn)
+    dest = NextcloudDestination(make_settings())
+
+    assert await dest.file_exists("song.mp3")
+    assert not await dest.file_exists("other.mp3")
+    assert conn.closed
+
+
+async def test_file_exists_rejects_unsafe_names(make_settings: MakeSettings) -> None:
+    with pytest.raises(UserFacingError, match="unsafe filename"):
+        await NextcloudDestination(make_settings()).file_exists("../evil.mp3")
+
+
+async def test_upload_overwrite_replaces_existing(
+    make_settings: MakeSettings, patch_connect: PatchConnect, tmp_path: Path
+) -> None:
+    conn = FakeConn(sftp=FakeSFTP({"/srv/music/song.mp3"}))
+    patch_connect(conn)
+    local = tmp_path / "song.mp3"
+    local.write_bytes(b"x")
+
+    final = await NextcloudDestination(make_settings()).upload(local, "song.mp3", overwrite=True)
+
+    assert final == "song.mp3"
+    assert conn.sftp.puts == [(str(local), "/srv/music/song.mp3.part")]
+    assert conn.sftp.removed == ["/srv/music/song.mp3"]
+    assert conn.sftp.renames == [("/srv/music/song.mp3.part", "/srv/music/song.mp3")]
+
+
+async def test_upload_overwrite_without_existing_file(
+    make_settings: MakeSettings, patch_connect: PatchConnect, tmp_path: Path
+) -> None:
+    conn = FakeConn()
+    patch_connect(conn)
+    local = tmp_path / "song.mp3"
+    local.write_bytes(b"x")
+
+    final = await NextcloudDestination(make_settings()).upload(local, "song.mp3", overwrite=True)
+
+    assert final == "song.mp3"
+    assert conn.sftp.removed == []
+    assert conn.sftp.renames == [("/srv/music/song.mp3.part", "/srv/music/song.mp3")]
+
+
 async def test_upload_forwards_progress(
     make_settings: MakeSettings, patch_connect: PatchConnect, tmp_path: Path
 ) -> None:
