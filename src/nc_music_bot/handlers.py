@@ -1,5 +1,6 @@
 """Telegram command handlers + the receive→upload→scan pipeline."""
 
+import asyncio
 import contextlib
 import logging
 import shutil
@@ -7,18 +8,28 @@ import uuid
 from typing import cast
 
 from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
     InlineQueryResultArticle,
     InputTextMessageContent,
     Message,
     MessageEntity,
     Update,
+    User,
 )
 from telegram.error import BadRequest, Forbidden
 from telegram.ext import ContextTypes
 
 from .config import Settings
 from .destination import Destination
-from .download import download_media, is_supported_audio
+from .download import download_media, is_supported_audio, resolve_filename
+from .duplicate import (
+    DuplicateChoice,
+    DuplicatePrompts,
+    ResolveOutcome,
+    build_callback_data,
+    parse_callback_data,
+)
 from .errors import UserFacingError
 from .progress import UploadProgressReporter
 from .whitelist import Whitelist
@@ -57,6 +68,10 @@ def _destination(context: ContextTypes.DEFAULT_TYPE) -> Destination:
 
 def _whitelist(context: ContextTypes.DEFAULT_TYPE) -> Whitelist:
     return cast(Whitelist, context.bot_data["whitelist"])
+
+
+def _duplicate_prompts(context: ContextTypes.DEFAULT_TYPE) -> DuplicatePrompts:
+    return cast(DuplicatePrompts, context.bot_data["duplicate_prompts"])
 
 
 def describe_message(message: Message) -> str:
@@ -259,27 +274,55 @@ async def _run_pipeline(
     *,
     status: Message | None,
     log_label: str,
+    initiator: User | None,
 ) -> str:
-    """Download → SFTP upload → occ scan, returning the final reply text.
+    """Duplicate gate → download → SFTP upload → occ scan, returning the reply text.
 
-    Stateless by construction — the temp directory is removed in `finally`,
-    success or not. When `status` is given, live progress is edited into it;
-    otherwise the transfer runs silently. Raises `UserFacingError` for failures
-    whose message is safe to relay.
+    The destination filename is derived from the message metadata (file name,
+    else artist/title tags), so duplicates are caught before any bytes are
+    downloaded. If the destination already has a file with that name,
+    `initiator` is asked (via inline buttons on `status`) whether to rename,
+    overwrite, or cancel; no answer — or no `status` channel to ask on — means
+    the file is not added. Stateless by construction — the temp directory is
+    removed in `finally`, success or not. When `status` is given, live progress
+    is edited into it; otherwise the transfer runs silently. Raises
+    `UserFacingError` for failures whose message is safe to relay.
     """
     settings = _settings(context)
     destination = _destination(context)
     workdir = None
     try:
-        local, filename = await download_media(media_message, settings)
-        workdir = local.parent
+        filename = resolve_filename(media_message, settings)
         log.info("Upload started — %s: %s", log_label, filename)
+        overwrite = False
+        prompted = False
+        if await destination.file_exists(filename):
+            if status is None:
+                log.info("Duplicate, no prompt channel — %s: %s not added", log_label, filename)
+                return f"🚫 {filename} already exists — not added."
+            prompted = True
+            choice = await _ask_duplicate_choice(
+                status, context, filename=filename, initiator=initiator
+            )
+            if choice is None:
+                log.info("Duplicate prompt timed out — %s: %s not added", log_label, filename)
+                return f"🚫 {filename} already exists — not added (no answer in time)."
+            if choice is DuplicateChoice.cancel:
+                log.info("Duplicate cancelled — %s: %s not added", log_label, filename)
+                return "🚫 Cancelled."
+            overwrite = choice is DuplicateChoice.overwrite
+        if status is not None and prompted:
+            await status.edit_text(f"⬇️ Receiving {filename} …")
+        local = await download_media(media_message, settings, filename)
+        workdir = local.parent
         reporter = None
         if status is not None:
             await status.edit_text(f"📤 Uploading {filename} …")
             reporter = UploadProgressReporter(status, filename)
         try:
-            remote_name = await destination.upload(local, filename, progress=reporter)
+            remote_name = await destination.upload(
+                local, filename, progress=reporter, overwrite=overwrite
+            )
         finally:
             if reporter is not None:
                 await reporter.finish()
@@ -299,16 +342,95 @@ async def _run_pipeline(
             shutil.rmtree(workdir, ignore_errors=True)
 
 
+async def _ask_duplicate_choice(
+    status: Message,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    filename: str,
+    initiator: User | None,
+) -> DuplicateChoice | None:
+    """Ask what to do about a duplicate via inline buttons; None on timeout.
+
+    The pipeline suspends on a future that `on_duplicate_choice` settles when an
+    authorized user presses a button. Prompts for bot-initiated uploads (source
+    bot relays) can be answered by any whitelisted user, since the initiating
+    bot cannot press buttons itself.
+    """
+    settings = _settings(context)
+    prompts = _duplicate_prompts(context)
+    token, future = prompts.create(
+        initiator_id=initiator.id if initiator is not None else None,
+        initiator_is_bot=initiator.is_bot if initiator is not None else True,
+    )
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "Upload anyway (rename)",
+                    callback_data=build_callback_data(token, DuplicateChoice.rename),
+                ),
+                InlineKeyboardButton(
+                    "Overwrite",
+                    callback_data=build_callback_data(token, DuplicateChoice.overwrite),
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "Cancel", callback_data=build_callback_data(token, DuplicateChoice.cancel)
+                )
+            ],
+        ]
+    )
+    try:
+        await status.edit_text(
+            f"⚠️ {filename} already exists in the music library. What would you like to do?",
+            reply_markup=keyboard,
+        )
+        return await asyncio.wait_for(future, timeout=settings.duplicate_check_timeout_secs)
+    except TimeoutError:
+        return None
+    finally:
+        prompts.discard(token)
+
+
+async def on_duplicate_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Settle a pending duplicate prompt from an inline button press."""
+    query = update.callback_query
+    if query is None or query.data is None:
+        return
+    parsed = parse_callback_data(query.data)
+    if parsed is None:
+        await query.answer()
+        return
+    token, choice = parsed
+    user = query.from_user
+    outcome = _duplicate_prompts(context).resolve(
+        token,
+        choice,
+        user_id=user.id,
+        is_whitelisted=_whitelist(context).is_allowed_user(user.id),
+    )
+    if outcome is ResolveOutcome.not_allowed:
+        await query.answer("Only the requester can decide this upload.")
+    elif outcome is ResolveOutcome.expired:
+        await query.answer("This prompt has expired.")
+    else:
+        await query.answer()
+
+
 async def _finish_upload(
     target: Message,
     context: ContextTypes.DEFAULT_TYPE,
     *,
     status: Message,
     log_label: str,
+    initiator: User | None,
 ) -> None:
     """Upload `target`'s audio, editing live progress + the result into `status`."""
     try:
-        reply = await _run_pipeline(target, context, status=status, log_label=log_label)
+        reply = await _run_pipeline(
+            target, context, status=status, log_label=log_label, initiator=initiator
+        )
     except UserFacingError as exc:
         log.warning("Transfer failed — %s: %s", log_label, exc)
         reply = f"❌ {exc}"
@@ -341,7 +463,13 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except (Forbidden, BadRequest) as exc:
         log.warning("Can't post for user %s (%s) — skipping", uid, exc)
         return
-    await _finish_upload(message, context, status=status, log_label=f"user {uid}")
+    await _finish_upload(
+        message,
+        context,
+        status=status,
+        log_label=f"user {uid}",
+        initiator=update.effective_user,
+    )
 
 
 def _guest_result(text: str) -> InlineQueryResultArticle:
@@ -386,7 +514,9 @@ async def handle_guest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except (Forbidden, BadRequest):
         dm = None
     try:
-        reply = await _run_pipeline(target, context, status=dm, log_label=f"guest user {caller.id}")
+        reply = await _run_pipeline(
+            target, context, status=dm, log_label=f"guest user {caller.id}", initiator=caller
+        )
     except UserFacingError as exc:
         log.warning("Guest transfer failed — user %s: %s", caller.id, exc)
         reply = f"❌ {exc}"
@@ -448,7 +578,9 @@ async def handle_unsupported(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 exc,
             )
             return
-        await _finish_upload(target, context, status=status, log_label=f"user {uid}")
+        await _finish_upload(
+            target, context, status=status, log_label=f"user {uid}", initiator=user
+        )
         return
     log.info("Ignoring non-audio message from user %s", uid)
     with contextlib.suppress(Forbidden, BadRequest):

@@ -154,7 +154,7 @@ async def test_supported_audio_runs_pipeline_and_answers_once(
     final = "✅ Added Song.mp3 — 1 track(s) indexed"
 
     async def _pipeline(
-        media_message: Message, context: object, *, status: Any, log_label: str
+        media_message: Message, context: object, *, status: Any, log_label: str, initiator: Any
     ) -> str:
         assert media_message.audio is not None
         if status is not None:
@@ -179,7 +179,7 @@ async def test_pipeline_user_facing_error_is_relayed(
     make_settings: MakeSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def _pipeline(
-        media_message: Message, context: object, *, status: Any, log_label: str
+        media_message: Message, context: object, *, status: Any, log_label: str, initiator: Any
     ) -> str:
         raise UserFacingError("File is 999 MB — over the limit.")
 
@@ -200,7 +200,7 @@ async def test_unreachable_dm_is_swallowed_and_reply_still_sent(
     final = "✅ Added Song.mp3"
 
     async def _pipeline(
-        media_message: Message, context: object, *, status: Any, log_label: str
+        media_message: Message, context: object, *, status: Any, log_label: str, initiator: Any
     ) -> str:
         assert status is None
         return final

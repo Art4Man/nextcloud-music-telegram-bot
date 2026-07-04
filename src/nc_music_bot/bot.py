@@ -6,6 +6,7 @@ from telegram import BotCommand, Update
 from telegram.ext import (
     Application,
     ApplicationBuilder,
+    CallbackQueryHandler,
     CommandHandler,
     MessageHandler,
     filters,
@@ -15,6 +16,7 @@ from . import handlers
 from .config import AppMode, Settings
 from .destination import choose_destination
 from .download import AUDIO_EXTENSIONS
+from .duplicate import CALLBACK_PREFIX, DuplicatePrompts
 from .whitelist import Whitelist
 
 log = logging.getLogger(__name__)
@@ -58,6 +60,7 @@ def build_application(settings: Settings) -> Application:
     app.bot_data["settings"] = settings
     app.bot_data["destination"] = choose_destination(settings)
     app.bot_data["whitelist"] = whitelist
+    app.bot_data["duplicate_prompts"] = DuplicatePrompts()
 
     trusted = whitelist.audio_filter
     app.add_handler(MessageHandler(filters.ALL, handlers.log_inbound), group=-1)
@@ -75,6 +78,9 @@ def build_application(settings: Settings) -> Application:
         MessageHandler(trusted & ~AUDIO_MESSAGE & ~filters.COMMAND, handlers.handle_unsupported)
     )
     app.add_handler(MessageHandler(filters.UpdateType.GUEST_MESSAGE, handlers.handle_guest))
+    app.add_handler(
+        CallbackQueryHandler(handlers.on_duplicate_choice, pattern=rf"^{CALLBACK_PREFIX}:")
+    )
     app.add_error_handler(handlers.on_error)
     return app
 

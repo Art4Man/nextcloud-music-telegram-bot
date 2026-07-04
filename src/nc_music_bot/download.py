@@ -66,27 +66,38 @@ def check_size(media: Audio | Document, settings: Settings) -> None:
         )
 
 
-async def download_media(message: Message, settings: Settings) -> tuple[Path, str]:
-    """Download the message's audio. Returns (local_path, filename).
+def resolve_filename(message: Message, settings: Settings) -> str:
+    """The destination filename for the message's audio, without downloading it.
 
-    The file lands in a unique directory under TEMP_DIR; the caller owns
-    deleting `local_path.parent` once the transfer is finished.
+    Built from the sent file name, else the performer/title tags — everything
+    Telegram exposes up front — so duplicates can be detected (and cancelled)
+    before any bytes are transferred. Also enforces the size guards, rejecting
+    oversized files equally early.
     """
     media = pick_media(message)
     check_size(media, settings)
     performer = media.performer if isinstance(media, Audio) else None
     title = media.title if isinstance(media, Audio) else None
-    filename = build_filename(
+    return build_filename(
         file_name=media.file_name,
         performer=performer,
         title=title,
         mime_type=media.mime_type,
         unique_id=media.file_unique_id,
     )
+
+
+async def download_media(message: Message, settings: Settings, filename: str) -> Path:
+    """Download the message's audio as `filename` (from `resolve_filename`).
+
+    The file lands in a unique directory under TEMP_DIR; the caller owns
+    deleting `local_path.parent` once the transfer is finished.
+    """
+    media = pick_media(message)
     workdir = settings.temp_dir / uuid.uuid4().hex
     workdir.mkdir(parents=True, exist_ok=True)
     local = workdir / filename
     tg_file = await media.get_file()
     await tg_file.download_to_drive(custom_path=local)
     log.info("Downloaded %s (%s bytes) from Telegram", filename, media.file_size)
-    return local, filename
+    return local
