@@ -40,12 +40,21 @@ async def _post_init(app: Application) -> None:
 
 
 def build_application(settings: Settings) -> Application:
+    """Build the wired PTB `Application`.
+
+    `concurrent_updates` must stay on: the duplicate-prompt flow suspends the
+    audio-message update on a future while waiting for a button press, and PTB
+    processes updates one at a time by default — the callback-query update
+    carrying that button press would never be dispatched until the suspended
+    handler times out.
+    """
     builder = (
         ApplicationBuilder()
         .token(settings.telegram_bot_token)
         .connect_timeout(30)
         .read_timeout(120)
         .write_timeout(120)
+        .concurrent_updates(True)
         .post_init(_post_init)
     )
     if settings.telegram_api_base_url:
