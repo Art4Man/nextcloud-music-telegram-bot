@@ -51,8 +51,15 @@ class Destination(Protocol):
 
     async def prepare(self) -> None: ...
 
+    async def file_exists(self, filename: str) -> bool: ...
+
     async def upload(
-        self, local: Path, filename: str, progress: Callable[[int, int], None] | None = None
+        self,
+        local: Path,
+        filename: str,
+        progress: Callable[[int, int], None] | None = None,
+        *,
+        overwrite: bool = False,
     ) -> str: ...
 
     async def scan(self) -> ScanResult: ...
@@ -76,12 +83,40 @@ class NextcloudDestination:
     async def prepare(self) -> None:
         """Nothing to set up remotely; the destination is reached on demand."""
 
+    async def file_exists(self, filename: str) -> bool:
+        """True if `filename` is already present in DEST_PATH.
+
+        Checked before an upload so the user can pick rename/overwrite/cancel.
+        The check and the upload are separate SFTP operations, so a concurrent
+        upload of the same name can still slip in between (known limitation).
+        """
+        if not is_safe_remote_name(filename):
+            raise UserFacingError(f"Refusing unsafe filename: {filename!r}")
+        s = self._s
+        conn = await self._connect()
+        try:
+            sftp = await conn.start_sftp_client()
+            return await sftp.exists(posixpath.join(s.dest_path, filename))
+        except (OSError, asyncssh.Error) as exc:
+            raise UserFacingError(f"Duplicate check on {s.dest_host} failed: {exc}") from exc
+        finally:
+            conn.close()
+            await conn.wait_closed()
+
     async def upload(
-        self, local: Path, filename: str, progress: Callable[[int, int], None] | None = None
+        self,
+        local: Path,
+        filename: str,
+        progress: Callable[[int, int], None] | None = None,
+        *,
+        overwrite: bool = False,
     ) -> str:
         """Upload `local` into DEST_PATH; returns the (collision-safe) remote name.
 
-        `progress`, if given, is called with (bytes copied, total bytes) as blocks land.
+        `progress`, if given, is called with (bytes copied, total bytes) as blocks
+        land. With `overwrite`, an existing file of the same name is replaced —
+        it is removed only after the new content has fully arrived as `.part`,
+        so the old file stays intact until the last moment.
         """
         if not is_safe_remote_name(filename):
             raise UserFacingError(f"Refusing unsafe filename: {filename!r}")
@@ -91,14 +126,17 @@ class NextcloudDestination:
             sftp = await conn.start_sftp_client()
             await sftp.makedirs(s.dest_path, exist_ok=True)
             final = filename
-            counter = 1
-            while await sftp.exists(posixpath.join(s.dest_path, final)):
-                final = numbered_variant(filename, counter)
-                counter += 1
+            if not overwrite:
+                counter = 1
+                while await sftp.exists(posixpath.join(s.dest_path, final)):
+                    final = numbered_variant(filename, counter)
+                    counter += 1
             target = posixpath.join(s.dest_path, final)
             # Stage under a .part name so a half-written file can never be scanned in.
             handler = _adapt_progress(progress) if progress is not None else None
             await sftp.put(str(local), f"{target}.part", progress_handler=handler)
+            if overwrite and await sftp.exists(target):
+                await sftp.remove(target)
             await sftp.rename(f"{target}.part", target)
             log.info("Uploaded %s -> %s", local.name, target)
         except (OSError, asyncssh.Error) as exc:

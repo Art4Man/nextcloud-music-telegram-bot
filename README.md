@@ -124,6 +124,32 @@ Guest Mode limits (from Telegram, not the bot):
 
 Either way, replying to something that isn't a supported audio file sends a short hint.
 
+### Duplicate files
+
+Before downloading anything, the bot derives the destination filename from the
+message metadata (the sent file name, else the `artist - title` tags) and checks
+whether it already exists in the library. If it does, you're asked what to do:
+
+```
+⚠️ song.mp3 already exists in the music library. What would you like to do?
+[Upload anyway (rename)]  [Overwrite]  [Cancel]
+```
+
+- **Upload anyway (rename)** — add a number suffix (`song (1).mp3`).
+- **Overwrite** — replace the existing file; the old one is removed only after the
+  new content has fully arrived.
+- **Cancel** — nothing is downloaded or uploaded.
+
+No answer within `DUPLICATE_CHECK_TIMEOUT_SECS` (default 60 s) cancels the upload —
+duplicates are **not added** unless you say so. The same applies when there's no way
+to ask (a guest-mode upload without a reachable DM). Only the user who initiated the
+upload can press the buttons; for audio auto-relayed from a source bot, any
+whitelisted user can decide.
+
+Known limitation: the existence check and the upload are separate SFTP operations,
+so two simultaneous uploads of the same name can still race past each other (the
+loser gets a number suffix).
+
 ### Whitelist management (admins)
 
 Admins — the IDs listed in `ALLOWED_USER_IDS` — can manage both whitelists live:
@@ -161,6 +187,7 @@ template). Env vars override `.env`.
 | `NEXTCLOUD_OCC` | no | `nextcloud.occ` | occ command (snap default; else e.g. `php /var/www/nextcloud/occ`) |
 | `NEXTCLOUD_USER` | no | `admin` | Nextcloud user owning the library |
 | `NEXTCLOUD_SCAN_PATH` | if scanning | — | `files:scan --path=` value, e.g. `admin/files/Music` |
+| `DUPLICATE_CHECK_TIMEOUT_SECS` | no | `60` | How long the duplicate prompt (rename/overwrite/cancel) waits before auto-cancelling |
 | `TEMP_DIR` | no | `<tmp>/nc-music-bot` | Staging dir on the bot host |
 | `LOG_LEVEL` | no | `INFO` | Python log level |
 

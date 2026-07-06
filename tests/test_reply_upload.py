@@ -83,7 +83,9 @@ async def test_reply_to_song_with_mention_uploads(
     final = "✅ Added Song.mp3 — 1 track(s) indexed"
     seen: dict[str, Message] = {}
 
-    async def _pipeline(target: Message, context: object, *, status: Any, log_label: str) -> str:
+    async def _pipeline(
+        target: Message, context: object, *, status: Any, log_label: str, initiator: Any
+    ) -> str:
         seen["target"] = target
         return final
 

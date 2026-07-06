@@ -34,14 +34,25 @@ class LocalStageDestination:
         shutil.rmtree(self._dir, ignore_errors=True)
         self._dir.mkdir(parents=True, exist_ok=True)
 
+    async def file_exists(self, filename: str) -> bool:
+        """True if `filename` is already present in the stage dir."""
+        if not is_safe_remote_name(filename):
+            raise UserFacingError(f"Refusing unsafe filename: {filename!r}")
+        return await asyncio.to_thread((self._dir / filename).exists)
+
     async def upload(
-        self, local: Path, filename: str, progress: Callable[[int, int], None] | None = None
+        self,
+        local: Path,
+        filename: str,
+        progress: Callable[[int, int], None] | None = None,
+        *,
+        overwrite: bool = False,
     ) -> str:
         """Copy `local` into the stage dir; returns the (collision-safe) final name."""
         if not is_safe_remote_name(filename):
             raise UserFacingError(f"Refusing unsafe filename: {filename!r}")
         try:
-            final = await asyncio.to_thread(self._copy_in, local, filename)
+            final = await asyncio.to_thread(self._copy_in, local, filename, overwrite)
         except OSError as exc:
             raise UserFacingError(f"Stage copy failed: {exc}") from exc
         if progress is not None:
@@ -50,13 +61,14 @@ class LocalStageDestination:
         log.info("Staged %s -> %s", local.name, self._dir / final)
         return final
 
-    def _copy_in(self, local: Path, filename: str) -> str:
+    def _copy_in(self, local: Path, filename: str, overwrite: bool) -> str:
         self._dir.mkdir(parents=True, exist_ok=True)
         final = filename
-        counter = 1
-        while (self._dir / final).exists():
-            final = numbered_variant(filename, counter)
-            counter += 1
+        if not overwrite:
+            counter = 1
+            while (self._dir / final).exists():
+                final = numbered_variant(filename, counter)
+                counter += 1
         target = self._dir / final
         part = target.with_name(f"{target.name}.part")
         shutil.copyfile(local, part)

@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     nextcloud_scan_path: str | None = None
 
     # ── Misc ──────────────────────────────────────────────────────────────
+    duplicate_check_timeout_secs: float = 60
     temp_dir: Path = Path(tempfile.gettempdir()) / "nc-music-bot"
     log_level: str = "INFO"
 
