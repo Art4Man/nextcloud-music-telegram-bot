@@ -293,14 +293,12 @@ async def _run_pipeline(
     workdir = None
     try:
         filename = resolve_filename(media_message, settings)
-        log.info("Upload started — %s: %s", log_label, filename)
+        log.info("Processing upload — %s: %s", log_label, filename)
         overwrite = False
-        prompted = False
         if await destination.file_exists(filename):
             if status is None:
                 log.info("Duplicate, no prompt channel — %s: %s not added", log_label, filename)
                 return f"🚫 {filename} already exists — not added."
-            prompted = True
             choice = await _ask_duplicate_choice(
                 status, context, filename=filename, initiator=initiator
             )
@@ -311,7 +309,7 @@ async def _run_pipeline(
                 log.info("Duplicate cancelled — %s: %s not added", log_label, filename)
                 return "🚫 Cancelled."
             overwrite = choice is DuplicateChoice.overwrite
-        if status is not None and prompted:
+        if status is not None:
             await status.edit_text(f"⬇️ Receiving {filename} …")
         local = await download_media(media_message, settings, filename)
         workdir = local.parent
@@ -459,7 +457,7 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     uid = update.effective_user.id if update.effective_user else "unknown"
     try:
-        status = await message.reply_text("⬇️ Receiving…")
+        status = await message.reply_text("⏳ Checking…")
     except (Forbidden, BadRequest) as exc:
         log.warning("Can't post for user %s (%s) — skipping", uid, exc)
         return
@@ -510,7 +508,7 @@ async def handle_guest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     dm: Message | None = None
     try:
-        dm = await context.bot.send_message(caller.id, "⬇️ Receiving…")
+        dm = await context.bot.send_message(caller.id, "⏳ Checking…")
     except (Forbidden, BadRequest):
         dm = None
     try:
@@ -570,7 +568,7 @@ async def handle_unsupported(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 uid,
                 f"🎵 You mentioned me on a song{where} — adding it to the music library…",
             )
-            status = await context.bot.send_message(uid, "⬇️ Receiving…")
+            status = await context.bot.send_message(uid, "⏳ Checking…")
         except (Forbidden, BadRequest) as exc:
             log.warning(
                 "Can't DM user %s (%s) — they must start a private chat with the bot first",
